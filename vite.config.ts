@@ -17,6 +17,17 @@ export default defineConfig({
     emptyOutDir: true,
     target: 'es2022',
     sourcemap: true,
+    chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        // keep the two PDF engines and React in their own long-lived chunks
+        manualChunks: {
+          pdfjs: ['pdfjs-dist/legacy/build/pdf.mjs'],
+          pdflib: ['pdf-lib'],
+          react: ['react', 'react-dom'],
+        },
+      },
+    },
   },
   server: {
     port: 5173,

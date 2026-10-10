@@ -17,6 +17,11 @@ import PdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?worker';
 import type { PageGeometry, PageRef, SourceDoc, SourceId } from './types';
 import { getPageGeometry } from './geometry';
 
+/** Resolve a path under the app's base URL (works for Vite dev, GitHub Pages sub-paths and app://). */
+function assetUrl(relative: string): string {
+  return new URL(relative, document.baseURI).href;
+}
+
 let workerReady = false;
 function ensureWorker(): void {
   if (workerReady) return;
@@ -33,7 +38,13 @@ export function loadPdfJsDocument(source: SourceDoc): Promise<PDFDocumentProxy> 
     ensureWorker();
     // pdf.js takes ownership of (and may detach) the buffer: hand it a copy.
     const data = source.bytes.slice();
-    p = pdfjsLib.getDocument({ data }).promise;
+    p = pdfjsLib.getDocument({
+      data,
+      // standard 14 fonts and CJK CMaps are copied to public/pdfjs by scripts/copy-pdfjs-assets.mjs
+      standardFontDataUrl: assetUrl('pdfjs/standard_fonts/'),
+      cMapUrl: assetUrl('pdfjs/cmaps/'),
+      cMapPacked: true,
+    }).promise;
     p.catch(() => docCache.delete(source.id));
     docCache.set(source.id, p);
   }

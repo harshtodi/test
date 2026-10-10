@@ -24,7 +24,11 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:electron": "playwright test --config playwright.electron.config.ts",
-    "check": "npm run typecheck && npm run lint && npm run test"
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "postinstall": "node scripts/copy-pdfjs-assets.mjs",
+    "predev": "node scripts/copy-pdfjs-assets.mjs",
+    "predev:web": "node scripts/copy-pdfjs-assets.mjs",
+    "prebuild:renderer": "node scripts/copy-pdfjs-assets.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
