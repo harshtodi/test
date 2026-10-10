@@ -1,5 +1,6 @@
 # Publishes the web build of the editor to GitHub Pages on every push to main.
-# One-time setup: repository Settings → Pages → Source: "GitHub Actions".
+# The configure-pages step enables Pages (Source: GitHub Actions) on first run;
+# if that is refused, enable it once under repository Settings → Pages.
 name: Deploy web app to GitHub Pages
 
 on:
@@ -28,6 +29,8 @@ jobs:
       - run: npm ci
       - run: npm run build:renderer
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
