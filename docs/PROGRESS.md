@@ -26,11 +26,19 @@ Status legend: `[x]` done · `[~]` in progress (notes say what is left) · `[ ]`
 - [x] **M8 — Packaging verification**: `electron-builder --dir --linux` builds (12 MB asar, node_modules excluded, icon shipped as extra resource); `scripts/smoke-packaged.mjs` launches the packaged binary under xvfb, opens a PDF from the command line and confirms rendering (`npm run smoke:packaged`). Windows/macOS installers are produced by `.github/workflows/release.yml` on a `v*` tag — **not yet exercised in GitHub Actions** (needs the repository on GitHub with Actions enabled).
 - [x] **M9 — Docs**: README (get it / use it / shortcuts / development / resuming work), docs/INSTALL.md (per-OS install, Gatekeeper/SmartScreen notes, build from source, publishing a release), docs/ARCHITECTURE.md, docs/testids/*.md.
 
-## Next steps (not started)
+## Release status
 
-1. Push this history to its own repository (`pdf-editor`) and set `main` as the default branch; enable *Settings → Pages → Source: GitHub Actions* for the web app.
-2. Push a `v0.1.0` tag to produce the first Windows/macOS/Linux installers via `release.yml`; test one install per OS and fix anything platform-specific (macOS/Windows code paths are untested so far).
-3. Optional improvements: embed a Unicode fallback font (fontkit) so non-Latin text stays selectable; keyboard access to annotations; code signing / notarisation when certificates are available.
+- [x] `main` is the default branch of `harshtodi/test` (the repository keeps its name; rename to `pdf-editor` any time, GitHub redirects).
+- [x] GitHub Pages enabled; the web app deploys from `main` and is live at https://harshtodi.github.io/test/ (deploy run 38040259513 succeeded).
+- [x] `release.yml` verified on GitHub runners via `workflow_dispatch`: Windows, macOS and Linux builds all succeed (run 38039925141, artifacts `release-windows`, `release-linux`, `release-macos`).
+- [ ] Publish v0.1.0: push the tag (`git tag -a v0.1.0 -m "PDF Editor 0.1.0" && git push origin v0.1.0`); the Release workflow then attaches the installers to a GitHub Release. Tag pushes are not possible from the cloud session (proxy policy), so this is a one-command step for the owner.
+- [ ] Install one build per OS and fix anything platform-specific (macOS/Windows code paths have only been compiled, not run).
+
+## Optional improvements
+
+- Embed a Unicode fallback font (`@pdf-lib/fontkit`) so non-Latin text stays selectable instead of rasterised.
+- Keyboard access to annotations (focusable overlay, arrow-key nudging).
+- Code signing / notarisation when certificates are available.
 
 ## Decisions log
 
