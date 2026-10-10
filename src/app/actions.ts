@@ -3,6 +3,7 @@ import { getPlatform } from '@/platform';
 import type { OpenedFile } from '@/platform';
 import { importFile } from '@/core/import';
 import { exportPdf } from '@/core/export';
+import { convertImageToPng, needsConversion, pngName } from '@/app/image-convert';
 
 /**
  * High-level document actions used by the toolbar, keyboard shortcuts, drop
@@ -10,7 +11,7 @@ import { exportPdf } from '@/core/export';
  * reused by every entry point.
  */
 
-export const ACCEPTED_EXTENSIONS = ['.pdf', '.png', '.jpg', '.jpeg', '.webp'];
+export const ACCEPTED_EXTENSIONS = ['.pdf', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.avif'];
 
 export function isAcceptedFile(name: string, type?: string): boolean {
   const lower = name.toLowerCase();
@@ -28,13 +29,18 @@ export async function openFiles(files: Iterable<File | OpenedFile>, insertAt?: n
   let at = insertAt;
   const failures: string[] = [];
   for (const file of files) {
-    const name = file.name;
-    if (!isAcceptedFile(name, 'type' in file ? file.type : undefined)) {
+    let name = file.name;
+    const type = isOpenedFile(file) ? undefined : file.type;
+    if (!isAcceptedFile(name, type)) {
       failures.push(`${name}: unsupported file type`);
       continue;
     }
     try {
-      const bytes = isOpenedFile(file) ? file.bytes : new Uint8Array(await file.arrayBuffer());
+      let bytes = isOpenedFile(file) ? file.bytes : new Uint8Array(await file.arrayBuffer());
+      if (needsConversion(name, type)) {
+        bytes = await convertImageToPng(new Blob([bytes as BlobPart], { type: type || undefined }));
+        name = pngName(name);
+      }
       const source = await importFile(name, bytes);
       const ids = useEditorStore.getState().addSource(source, at);
       if (at !== undefined) at += ids.length;

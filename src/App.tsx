@@ -73,7 +73,7 @@ export function App() {
         ref={fileInputRef}
         data-testid="file-input"
         type="file"
-        accept=".pdf,application/pdf,image/png,image/jpeg,image/webp"
+        accept=".pdf,application/pdf,image/*"
         multiple
         hidden
         onChange={(e) => {

@@ -64,13 +64,24 @@ interface FilePickerWindow extends Window {
   }) => Promise<{ createWritable(): Promise<{ write(d: BufferSource | Blob): Promise<void>; close(): Promise<void> }> }>;
 }
 
+/** localStorage key; set to "download" to bypass the native save picker (used by e2e tests). */
+export const SAVE_MODE_KEY = 'pdf-editor.save-mode';
+
+function forceDownload(): boolean {
+  try {
+    return localStorage.getItem(SAVE_MODE_KEY) === 'download';
+  } catch {
+    return false;
+  }
+}
+
 const webPlatform: Platform = {
   isElectron: false,
   openFiles: null,
   async saveFile(bytes, suggestedName) {
     const w = window as FilePickerWindow;
     const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' });
-    if (typeof w.showSaveFilePicker === 'function' && window.isSecureContext) {
+    if (typeof w.showSaveFilePicker === 'function' && window.isSecureContext && !forceDownload()) {
       try {
         const handle = await w.showSaveFilePicker({
           suggestedName,
