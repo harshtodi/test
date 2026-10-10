@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { PDFDocument, PDFName, PDFDict } from 'pdf-lib';
+import { PDFDocument, PDFName, PDFDict, PDFStream } from 'pdf-lib';
 import { openApp, uploadPdf, expectPageCount, pageTexts, saveAndDownload, extractText } from './helpers';
 
 async function layerBox(page: Page) {
@@ -159,8 +159,9 @@ test.describe('annotations', () => {
     const resources = doc.getPage(0).node.Resources();
     const xobjects = resources?.lookup(PDFName.of('XObject'), PDFDict);
     const hasImage = (xobjects?.keys() ?? []).some((k) => {
-      const d = xobjects!.lookup(k, PDFDict);
-      return d.get(PDFName.of('Subtype'))?.toString() === '/Image';
+      const obj = xobjects!.lookup(k);
+      const dict = obj instanceof PDFStream ? obj.dict : obj instanceof PDFDict ? obj : null;
+      return dict?.get(PDFName.of('Subtype'))?.toString() === '/Image';
     });
     expect(hasImage).toBe(true);
     const texts = await pageTexts(bytes);

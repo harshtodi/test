@@ -13,6 +13,7 @@ Cross-platform desktop PDF editor (Electron + React + TypeScript). pdf.js render
 - `npm run test:e2e` — Playwright web tests (starts the Vite server itself).
 - `npm run build && xvfb-run -a npm run test:e2e:electron` — Electron smoke tests on headless Linux.
 - `npm run package` — installers via electron-builder (`package:dir` for an unpacked build).
+- `npm run package:dir && xvfb-run -a npm run smoke:packaged` — opens a PDF in the packaged binary and checks it renders.
 
 ## Conventions
 - Annotation coordinates are **display space** (see `src/core/types.ts` header). Never store canvas pixels.

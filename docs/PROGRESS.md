@@ -22,9 +22,15 @@ Status legend: `[x]` done · `[~]` in progress (notes say what is left) · `[ ]`
 - [x] **M4 — Toolbar & signatures**: `src/components/Toolbar/` (file menu, undo/redo, view toggle, page navigation, page ops, tools, context-sensitive options that also restyle the selected annotation, zoom) and `src/components/Signature/` (draw / type / upload, trimmed transparent PNG, saved signatures in localStorage).
 - [x] **M5 — Desktop shell**: `electron/` (secure window, `app://` protocol with traversal protection, native open/save dialogs with validated IPC, menu, single instance + file association / CLI open, unsaved-changes prompt, window state), electron-builder config, app icon (`build/icon.svg` → `scripts/make-icon.mjs`), GitHub Actions `ci.yml` + `release.yml`, `docs/INSTALL.md`. Electron smoke test in `tests/e2e/electron/`.
 - [x] **M6 — Integration & web e2e**: everything wired in `src/App.tsx`; integration fixes applied (pdf.js legacy build, annotation remap on page rotation, Ctrl+O / zoom shortcuts, native undo in text fields from the macOS menu, scrollbar gutter, Windows portable artifact name, icon as extra resource, pdf.js standard fonts + CMaps bundled, vendor chunks split). Playwright specs in `tests/e2e/` (open, pages, annotate, signatures): 19/19 green; Electron smoke: 10/10 green under xvfb; `electron-builder --dir --linux` succeeds.
-- [~] **M7 — Review & hardening**: workflow running (six area bug-hunters → adversarial verification → one fixer per file group). **Left: review its report, re-run `npm run check`, web e2e and Electron smoke, record remaining gaps below.**
-- [ ] **M8 — Packaging verification**: `npm run package:dir` on Linux, Electron smoke test (`tests/e2e/electron/`) under xvfb, confirm installers build in CI for Windows/macOS/Linux.
-- [ ] **M9 — Docs**: README (install per OS, usage, keyboard shortcuts, development), ARCHITECTURE notes final.
+- [x] **M7 — Review & hardening**: six area bug-hunters + adversarial verification produced 47 confirmed findings; all fixed except keyboard access to annotations (recorded below). Results: `npm run check` green (230 unit tests), web e2e 35/35, Electron smoke 11/11 under xvfb. Decisions recorded in the log below.
+- [x] **M8 — Packaging verification**: `electron-builder --dir --linux` builds (12 MB asar, node_modules excluded, icon shipped as extra resource); `scripts/smoke-packaged.mjs` launches the packaged binary under xvfb, opens a PDF from the command line and confirms rendering (`npm run smoke:packaged`). Windows/macOS installers are produced by `.github/workflows/release.yml` on a `v*` tag — **not yet exercised in GitHub Actions** (needs the repository on GitHub with Actions enabled).
+- [x] **M9 — Docs**: README (get it / use it / shortcuts / development / resuming work), docs/INSTALL.md (per-OS install, Gatekeeper/SmartScreen notes, build from source, publishing a release), docs/ARCHITECTURE.md, docs/testids/*.md.
+
+## Next steps (not started)
+
+1. Push this history to its own repository (`pdf-editor`) and set `main` as the default branch; enable *Settings → Pages → Source: GitHub Actions* for the web app.
+2. Push a `v0.1.0` tag to produce the first Windows/macOS/Linux installers via `release.yml`; test one install per OS and fix anything platform-specific (macOS/Windows code paths are untested so far).
+3. Optional improvements: embed a Unicode fallback font (fontkit) so non-Latin text stays selectable; keyboard access to annotations; code signing / notarisation when certificates are available.
 
 ## Decisions log
 

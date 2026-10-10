@@ -43,6 +43,7 @@ npm run check        # typecheck + lint + unit tests
 npm run test:e2e     # Playwright UI tests (starts the Vite server itself)
 npm run build && xvfb-run -a npm run test:e2e:electron   # Electron smoke tests (Linux)
 npm run package      # installers into release/ (package:dir for an unpacked build)
+npm run package:dir && xvfb-run -a npm run smoke:packaged   # launch the packaged binary and check it renders
 ```
 
 Architecture, coordinate systems and conventions: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Agent instructions: [CLAUDE.md](CLAUDE.md).
