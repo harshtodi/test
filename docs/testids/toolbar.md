@@ -132,3 +132,13 @@ Saved signatures live in `localStorage["pdf-editor.signatures"]` as a JSON array
 `{ id, dataUrl, width, height, createdAt }`, newest first, max 8, de-duplicated by image. Corrupt JSON is
 treated as an empty list. Pure helpers in `src/components/Signature/signature-store.ts`
 (`parseSignatures`, `addToList`, `removeFromList`, `saveSignature`, `removeSignature`, `loadSignatures`).
+
+## Updates after M7 (hardening)
+
+- **Page action target**: the selected pages when the selection is non-empty (in either view), otherwise the active page. Tooltips read "current page", "selected page" (one selected page that is not the active one) or "selected pages". `tb-insert-blank` inserts after the last page of that target, in document order (same rule as the grid header button).
+- **Delete / Backspace** route by view: grid view removes the selected pages; editor view removes the selected annotation (or, with no annotation selected, the sidebar page selection).
+- **Keyboard**: `Ctrl+Z` / `Ctrl+Y` / `Delete` keep working while a `<select>` or colour input has focus; the single-letter tool keys (V/T/P/H/R/W/G) are inert without pages or in grid view; `Ctrl+O` opens files; `Ctrl` + `+`/`-`/`0` zoom.
+- **Busy state**: `tb-save` and `tb-save-selected` are disabled while `store.busy` is set; `Notice` renders `busy-indicator` with `data-busy="importing" | "saving"`.
+- **File name**: `tb-filename` → click → `tb-filename-input`; Enter/blur commits (always ending in `.pdf`, invalid characters stripped, empty reverts).
+- **Signature dialog**: `Ctrl+S` / `Ctrl+O` inside the dialog are prevented from reaching the browser; the overflow menu closes when focus leaves it.
+- Toolbar helper functions now have unit tests in `tests/unit/toolbar-helpers.test.ts`.

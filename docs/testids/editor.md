@@ -49,3 +49,11 @@ viewport; the overlay converts them to display space (points, origin bottom-left
   `page.mouse.click(x, y)` there silently does nothing. Either use a taller viewport
   (e.g. 1280×1500), zoom out first, or click via `locator.click({ position })`, which scrolls
   the target into view (the overlay's bounding box then changes, so re-read it after scrolling).
+
+## Updates after M7 (hardening)
+
+- `annotation-layer`: `touch-action` is `none` for every tool except the select tool with nothing selected, where it is `pan-x pan-y pinch-zoom` so touch users can scroll the page; new attribute `data-selected` = id of the selected annotation.
+- Moving/resizing re-renders only the dragged annotation (the rest of the layer is memoised); the pointer gesture is cancelled when the active page changes.
+- Switching to a page of a different size renders at that page's own fit scale from the first frame; toolbar/keyboard/menu zoom keeps the viewport centre.
+- Clicking a toolbar option while the inline text editor is open applies the style to the text being typed instead of committing it.
+- The on-screen preview of a text annotation shows the same `?` substitutions the export would make (`exportPreviewText`); non-WinAnsi text is rasterised on save (see `src/app/text-raster.ts`).

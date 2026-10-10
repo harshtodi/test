@@ -94,3 +94,9 @@ Keyboard (focus a tile first; the active tile is the tabbable one)
 
 The list variant scrolls the active tile into view (`scrollIntoView({block:'nearest'})`) whenever
 `activePageId` changes; the sticky header height is accounted for via `scroll-margin-top`.
+
+## Updates after M7 (hardening)
+
+- **Touch**: press and hold a tile ~250 ms, then drag; moving more than 8 px before that scrolls instead.
+- **Keyboard**: `Delete`/`Backspace` with focus inside `page-grid-items` removes the selected pages and stops propagation; the global handler (`src/app/shortcuts.ts`) covers the rest and ignores keys that were already handled (`defaultPrevented`).
+- The grid header "Insert blank page" and the toolbar button use the same target rule (after the last selected page in document order).
