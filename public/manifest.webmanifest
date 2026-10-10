@@ -1,0 +1,13 @@
+{
+  "name": "PDF Editor",
+  "short_name": "PDF Editor",
+  "description": "Merge, rearrange, annotate and sign PDFs locally in your browser.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f4f6",
+  "theme_color": "#2563eb",
+  "icons": [
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
