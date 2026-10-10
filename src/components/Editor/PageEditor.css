@@ -1,0 +1,165 @@
+/* ---------- page editor (M3) ---------- */
+/*
+ * The fit-to-width scale is derived from the pane's inner width. On platforms
+ * with classic (non-overlay) scrollbars the vertical scrollbar would otherwise
+ * shrink that width when the page gets taller than the pane, which shrinks the
+ * page, which can drop the scrollbar again... Reserve the gutter so the width
+ * the editor measures never depends on whether the pane currently scrolls.
+ */
+.editor-pane:has(> .page-editor) {
+  scrollbar-gutter: stable;
+}
+
+.page-editor {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 100%;
+}
+
+/* grows with the page when zoomed in so the padding survives on every side */
+.page-editor-stage {
+  flex: 1 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: max-content;
+  min-width: 100%;
+  padding: 24px;
+}
+
+.page-editor-empty {
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+.page-editor-hint {
+  margin: 0;
+  padding: 24px;
+  text-align: center;
+}
+
+.page-editor-page {
+  position: relative;
+  flex: none;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px var(--border),
+    0 4px 16px rgba(0, 0, 0, 0.18);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.page-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  background: #fff;
+}
+
+.page-render-error {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 6px;
+  padding: 24px;
+  text-align: center;
+  color: var(--danger);
+  background: var(--panel);
+}
+.page-render-error span {
+  color: var(--text-muted);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+/* ---------- annotation overlay ---------- */
+.annotation-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  overflow: hidden;
+  touch-action: none;
+  cursor: default;
+}
+/* the <svg> gets every pointer event; hit-testing is geometric */
+.annotation-layer * {
+  pointer-events: none;
+}
+
+.annotation-layer[data-cursor='pointer'] {
+  cursor: pointer;
+}
+.annotation-layer[data-cursor='move'] {
+  cursor: move;
+}
+.annotation-layer[data-cursor='text'] {
+  cursor: text;
+}
+.annotation-layer[data-cursor='crosshair'] {
+  cursor: crosshair;
+}
+.annotation-layer[data-cursor='copy'] {
+  cursor: copy;
+}
+.annotation-layer[data-cursor='nwse-resize'] {
+  cursor: nwse-resize;
+}
+.annotation-layer[data-cursor='nesw-resize'] {
+  cursor: nesw-resize;
+}
+
+.annotation-text text {
+  white-space: pre;
+}
+
+.blend-multiply {
+  mix-blend-mode: multiply;
+}
+
+.ink-preview {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* a white box on a white page: outline the preview so the user sees it */
+.rect-preview[data-mode='whiteout'] {
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.selection-box {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+}
+.resize-handle {
+  fill: var(--panel);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+/* ---------- inline text editor ---------- */
+.text-editor-input {
+  position: absolute;
+  box-sizing: content-box;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  overflow-wrap: normal;
+  outline: 1px dashed var(--accent);
+  outline-offset: 2px;
+  letter-spacing: normal;
+  word-spacing: normal;
+}

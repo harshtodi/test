@@ -1,4 +1,4 @@
-import { PDFDocument, PDFHexString, StandardFonts, degrees, rgb } from 'pdf-lib';
+import { PDFDocument, PDFHexString, PDFName, StandardFonts, degrees, rgb } from 'pdf-lib';
 
 export interface FixturePage {
   /** Text drawn near the top-left so tests can identify the page. */
@@ -30,6 +30,59 @@ export async function makePdf(pages: FixturePage[]): Promise<Uint8Array> {
 
 export async function makeLabeledPdf(count: number, prefix = 'Page'): Promise<Uint8Array> {
   return makePdf(Array.from({ length: count }, (_, i) => ({ label: `${prefix} ${i + 1}` })));
+}
+
+export interface StructuredPdfOptions {
+  /** Number of pages (default 2). */
+  pageCount?: number;
+  /** Raw content stream of page `index` (0-based). Default: a "Page N" label set in /F1 (Helvetica). */
+  content?: (index: number) => string;
+  /**
+   * Entries placed on the root /Pages node and removed from every page leaf,
+   * so the pages inherit them. `Resources: true` moves the shared font
+   * resources up the tree as well.
+   */
+  inherited?: {
+    MediaBox?: [number, number, number, number];
+    CropBox?: [number, number, number, number];
+    Rotate?: number;
+    Resources?: boolean;
+  };
+  /**
+   * Make every page reference ONE indirect /Contents array (legal, and what
+   * some generators emit for template pages). Every page then shows page 0's
+   * content.
+   */
+  sharedContentsArray?: boolean;
+}
+
+/**
+ * Build a PDF with hand-written page-tree structure (inherited attributes,
+ * shared objects) that pdf-lib's high-level API never produces, to exercise
+ * import/export against real-world document shapes.
+ */
+export async function makeStructuredPdf(options: StructuredPdfOptions = {}): Promise<Uint8Array> {
+  const { pageCount = 2, inherited = {}, sharedContentsArray = false } = options;
+  const content = options.content ?? ((i: number) => `BT /F1 36 Tf 50 700 Td (Page ${i + 1}) Tj ET`);
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const { context } = doc;
+  const resourcesRef = context.register(context.obj({ Font: { F1: font.ref } }));
+  const pagesNode = doc.catalog.Pages();
+  if (inherited.Resources) pagesNode.set(PDFName.of('Resources'), resourcesRef);
+  if (inherited.MediaBox) pagesNode.set(PDFName.of('MediaBox'), context.obj(inherited.MediaBox));
+  if (inherited.CropBox) pagesNode.set(PDFName.of('CropBox'), context.obj(inherited.CropBox));
+  if (inherited.Rotate !== undefined) pagesNode.set(PDFName.of('Rotate'), context.obj(inherited.Rotate));
+  const streamRef = (i: number) => context.register(context.stream(content(i)));
+  const sharedContents = sharedContentsArray ? context.register(context.obj([streamRef(0)])) : null;
+  for (let i = 0; i < pageCount; i++) {
+    const page = doc.addPage([612, 792]);
+    if (inherited.Resources) page.node.delete(PDFName.of('Resources'));
+    else page.node.set(PDFName.of('Resources'), resourcesRef);
+    if (inherited.MediaBox) page.node.delete(PDFName.of('MediaBox'));
+    page.node.set(PDFName.of('Contents'), sharedContents ?? streamRef(i));
+  }
+  return doc.save({ useObjectStreams: false });
 }
 
 /**

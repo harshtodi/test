@@ -4,14 +4,16 @@
  * - `useInView(ref)` flips to `true` once the element scrolls near the visible
  *   area of its scroll container (one shared IntersectionObserver per scroll
  *   root, with a pre-load margin) and stays true for the life of the component.
- * - `useThumbnail(page, source, widthPx, enabled)` asks `src/core/render.ts`
- *   for the (cached, queued) PNG data URL once `enabled` is true and reports the
- *   result for the *current* geometry only, so a rotated page shows its new
- *   aspect-ratio placeholder instead of a stale, wrongly oriented image.
+ * - `useThumbnail(page, source, box, enabled)` asks `src/core/render.ts` for
+ *   the (cached, queued) PNG data URL once `enabled` is true and reports the
+ *   result for the *current* geometry only. While a re-render for a new
+ *   rotation is pending it hands back the previously loaded image as `stale`
+ *   (with the rotation it was rendered at) so the tile can show it rotated by
+ *   CSS instead of flashing a placeholder.
  */
 import { useEffect, useState } from 'react';
 import type { RefObject } from 'react';
-import type { PageRef, SourceDoc } from '@/core/types';
+import type { PageRef, Rotation, SourceDoc } from '@/core/types';
 import { getThumbnailDataUrl, thumbnailKey } from '@/core/render';
 
 const PRELOAD_MARGIN = '320px 0px 320px 0px';
@@ -87,47 +89,72 @@ export function useInView(ref: RefObject<Element | null>): boolean {
   return inView;
 }
 
+/** Size (CSS px) and total rotation a thumbnail is rendered for. */
+export interface ThumbBox {
+  width: number;
+  height: number;
+  rotation: Rotation;
+}
+
+/** A previously loaded image for the same page, rendered for a different box. */
+export interface StaleThumbnail extends ThumbBox {
+  src: string;
+}
+
 export interface ThumbnailState {
-  /** PNG data URL for the page at its current rotation, or null while loading. */
+  /** PNG data URL for the page at its current rotation/size, or null while loading. */
   src: string | null;
   error: boolean;
+  /** Last image loaded for an earlier rotation/size; only set while `src` is null and no error occurred. */
+  stale: StaleThumbnail | null;
 }
+
+interface Loaded {
+  key: string | null;
+  src: string | null;
+  error: boolean;
+  box: ThumbBox;
+}
+
+const NOTHING: Loaded = { key: null, src: null, error: false, box: { width: 0, height: 0, rotation: 0 } };
 
 /** Load (or fetch from the render cache) the thumbnail once `enabled`. */
 export function useThumbnail(
   page: PageRef,
   source: SourceDoc | undefined,
-  widthPx: number,
+  box: ThumbBox,
   enabled: boolean,
 ): ThumbnailState {
-  const key = source ? safeKey(page, source, widthPx) : null;
-  const [state, setState] = useState<{ key: string | null; src: string | null; error: boolean }>({
-    key: null,
-    src: null,
-    error: false,
-  });
+  const { width, height, rotation } = box;
+  const key = source ? safeKey(page, source, width) : null;
+  const [state, setState] = useState<Loaded>(NOTHING);
 
   useEffect(() => {
     if (!enabled || !source || key === null) return;
     let cancelled = false;
-    getThumbnailDataUrl(page, source, widthPx).then(
+    const loadedBox: ThumbBox = { width, height, rotation };
+    getThumbnailDataUrl(page, source, width).then(
       (src) => {
         if (cancelled) return;
-        setState((prev) => (prev.key === key && prev.src === src && !prev.error ? prev : { key, src, error: false }));
+        setState((prev) =>
+          prev.key === key && prev.src === src && !prev.error ? prev : { key, src, error: false, box: loadedBox },
+        );
       },
       () => {
         if (cancelled) return;
-        setState((prev) => (prev.key === key && prev.error ? prev : { key, src: null, error: true }));
+        setState((prev) => (prev.key === key && prev.error ? prev : { key, src: null, error: true, box: loadedBox }));
       },
     );
     return () => {
       cancelled = true;
     };
-  }, [enabled, source, page, widthPx, key]);
+  }, [enabled, source, page, key, width, height, rotation]);
 
-  if (key === null) return { src: null, error: true };
-  if (state.key !== key) return { src: null, error: false };
-  return { src: state.src, error: state.error };
+  if (key === null) return { src: null, error: true, stale: null };
+  if (state.key !== key) {
+    return { src: null, error: false, stale: state.src ? { src: state.src, ...state.box } : null };
+  }
+  return { src: state.src, error: state.error, stale: null };
 }
 
 function safeKey(page: PageRef, source: SourceDoc, widthPx: number): string | null {

@@ -10,9 +10,10 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { PageGeometry, PageId, PageRef, SourceDoc } from '@/core/types';
 import { PAGE_SIZES } from '@/core/types';
-import { getPageGeometry } from '@/core/geometry';
+import { getPageGeometry, normalizeRotation } from '@/core/geometry';
 import { fitThumbSize } from './helpers';
 import { useInView, useThumbnail } from './useThumbnail';
+import type { StaleThumbnail, ThumbBox } from './useThumbnail';
 import { DuplicateIcon, RotateCcwIcon, RotateCwIcon, TrashIcon } from './icons';
 
 /** Tall pages are capped at this many times the thumbnail width. */
@@ -30,9 +31,11 @@ export function safeGeometry(page: PageRef, source: SourceDoc | undefined): Page
   return { width, height, totalRotation: page.rotation, displayWidth: width, displayHeight: height };
 }
 
-export function thumbBox(page: PageRef, source: SourceDoc | undefined, thumbWidth: number) {
+/** Thumbnail frame (CSS px) and total rotation for a page at a given tile width. */
+export function thumbBox(page: PageRef, source: SourceDoc | undefined, thumbWidth: number): ThumbBox {
   const g = safeGeometry(page, source);
-  return fitThumbSize(g.displayWidth, g.displayHeight, thumbWidth, Math.round(thumbWidth * THUMB_MAX_ASPECT));
+  const fit = fitThumbSize(g.displayWidth, g.displayHeight, thumbWidth, Math.round(thumbWidth * THUMB_MAX_ASPECT));
+  return { width: fit.width, height: fit.height, rotation: g.totalRotation };
 }
 
 function cx(...parts: (string | false | null | undefined)[]): string {
@@ -48,6 +51,72 @@ function stopActivationKeys(e: ReactKeyboardEvent): void {
   if (e.key === ' ' || e.key === 'Enter') e.stopPropagation();
 }
 
+/**
+ * The picture inside a tile frame: the current thumbnail, else the previous
+ * one rotated/scaled by CSS while a re-render is pending, else a placeholder.
+ */
+function ThumbImage({
+  src,
+  stale,
+  error,
+  box,
+  withTestIds,
+}: {
+  src: string | null;
+  stale: StaleThumbnail | null;
+  error: boolean;
+  box: ThumbBox;
+  /** Only the real tiles carry test ids; the drag preview must not duplicate them. */
+  withTestIds: boolean;
+}) {
+  if (src) {
+    return (
+      <img
+        className="page-thumb-image"
+        data-testid={withTestIds ? 'page-thumb-image' : undefined}
+        src={src}
+        alt=""
+        width={box.width}
+        height={box.height}
+        draggable={false}
+        decoding="async"
+      />
+    );
+  }
+  if (stale) {
+    // Rotation is clockwise in both PDF /Rotate and CSS rotate().
+    const delta = normalizeRotation(box.rotation - stale.rotation);
+    const swap = delta === 90 || delta === 270;
+    const rotatedWidth = swap ? stale.height : stale.width;
+    const rotatedHeight = swap ? stale.width : stale.height;
+    const scale = Math.min(box.width / rotatedWidth, box.height / rotatedHeight);
+    const style: CSSProperties = {
+      width: stale.width,
+      height: stale.height,
+      transform: `translate(-50%, -50%) rotate(${delta}deg) scale(${scale})`,
+    };
+    return (
+      <img
+        className="page-thumb-image page-thumb-stale"
+        data-testid={withTestIds ? 'page-thumb-stale' : undefined}
+        src={stale.src}
+        alt=""
+        width={stale.width}
+        height={stale.height}
+        style={style}
+        draggable={false}
+      />
+    );
+  }
+  return (
+    <div
+      className={cx('page-thumb-placeholder', error && 'error')}
+      data-testid={withTestIds ? 'page-thumb-placeholder' : undefined}
+      aria-hidden="true"
+    />
+  );
+}
+
 export interface PageThumbnailProps {
   page: PageRef;
   source: SourceDoc | undefined;
@@ -56,6 +125,10 @@ export interface PageThumbnailProps {
   thumbWidth: number;
   selected: boolean;
   active: boolean;
+  /** The one tile reachable with Tab (roving tabindex): the active page, else the first page. */
+  tabbable: boolean;
+  /** Part of a multi-page selection that is currently being dragged (not the dragged tile itself). */
+  dragMember: boolean;
   onClick: (id: PageId, e: ReactMouseEvent<HTMLElement>) => void;
   onDoubleClick: (id: PageId) => void;
   onRotate: (id: PageId, delta: 90 | -90) => void;
@@ -70,6 +143,8 @@ export const PageThumbnail = memo(function PageThumbnail({
   thumbWidth,
   selected,
   active,
+  tabbable,
+  dragMember,
   onClick,
   onDoubleClick,
   onRotate,
@@ -83,8 +158,8 @@ export const PageThumbnail = memo(function PageThumbnail({
 
   const frameRef = useRef<HTMLDivElement>(null);
   const inView = useInView(frameRef);
-  const { width, height } = thumbBox(page, source, thumbWidth);
-  const { src, error } = useThumbnail(page, source, width, inView);
+  const box = thumbBox(page, source, thumbWidth);
+  const { src, error, stale } = useThumbnail(page, source, box, inView);
 
   const setRefs = useCallback(
     (el: HTMLDivElement | null) => {
@@ -102,7 +177,13 @@ export const PageThumbnail = memo(function PageThumbnail({
   return (
     <div
       ref={setRefs}
-      className={cx('page-thumb', selected && 'selected', active && 'active', isDragging && 'dragging')}
+      className={cx(
+        'page-thumb',
+        selected && 'selected',
+        active && 'active',
+        isDragging && 'dragging',
+        dragMember && 'drag-member',
+      )}
       style={style}
       data-testid="page-thumb"
       data-page-index={index}
@@ -116,29 +197,12 @@ export const PageThumbnail = memo(function PageThumbnail({
       aria-selected={selected}
       aria-pressed={undefined}
       aria-label={`Page ${pageNumber}, ${title}`}
-      tabIndex={active ? 0 : -1}
+      tabIndex={tabbable ? 0 : -1}
       onClick={(e) => onClick(page.id, e)}
       onDoubleClick={() => onDoubleClick(page.id)}
     >
-      <div ref={frameRef} className="page-thumb-frame" style={{ width, height }}>
-        {src ? (
-          <img
-            className="page-thumb-image"
-            data-testid="page-thumb-image"
-            src={src}
-            alt=""
-            width={width}
-            height={height}
-            draggable={false}
-            decoding="async"
-          />
-        ) : (
-          <div
-            className={cx('page-thumb-placeholder', error && 'error')}
-            data-testid="page-thumb-placeholder"
-            aria-hidden="true"
-          />
-        )}
+      <div ref={frameRef} className="page-thumb-frame" style={{ width: box.width, height: box.height }}>
+        <ThumbImage src={src} stale={stale} error={error} box={box} withTestIds />
         <span className="page-thumb-badge" data-testid="page-thumb-badge" aria-hidden="true">
           {pageNumber}
         </span>
@@ -217,16 +281,12 @@ export function ThumbPreview({
   /** Number of pages moving together. */
   count: number;
 }) {
-  const { width, height } = thumbBox(page, source, thumbWidth);
-  const { src } = useThumbnail(page, source, width, true);
+  const box = thumbBox(page, source, thumbWidth);
+  const { src, error, stale } = useThumbnail(page, source, box, true);
   return (
     <div className="page-thumb page-thumb-preview" data-testid="page-drag-overlay" data-page-id={page.id}>
-      <div className="page-thumb-frame" style={{ width, height }}>
-        {src ? (
-          <img className="page-thumb-image" src={src} alt="" width={width} height={height} draggable={false} />
-        ) : (
-          <div className="page-thumb-placeholder" aria-hidden="true" />
-        )}
+      <div className="page-thumb-frame" style={{ width: box.width, height: box.height }}>
+        <ThumbImage src={src} stale={stale} error={error} box={box} withTestIds={false} />
         <span className="page-thumb-badge" aria-hidden="true">
           {index + 1}
         </span>

@@ -16,7 +16,7 @@ import type {
   SourceDoc,
   TextAnnotation,
 } from '@/core/types';
-import { TINY_JPEG, TINY_PNG, makeLabeledPdf, makePdf, toDataUrl } from '../helpers/make-pdf';
+import { TINY_JPEG, TINY_PNG, makeLabeledPdf, makePdf, makeStructuredPdf, toDataUrl } from '../helpers/make-pdf';
 import { makePng } from '../helpers/make-png';
 import {
   countImageXObjects,
@@ -161,6 +161,54 @@ describe('exportPdf — page operations', () => {
     expect(await getPageTexts(bytes)).toEqual(['Alpha 1', 'Beta 2', 'Alpha 2', 'Beta 1']);
   });
 
+  it('does not leak annotations between pages that share one /Contents array', async () => {
+    // Some generators point every template page at the same indirect Contents
+    // array. pdf-lib keeps that sharing when copying, so without isolation one
+    // page's annotation stream would be appended to all of them.
+    const src = await importFile('shared.pdf', await makeStructuredPdf({ pageCount: 3, sharedContentsArray: true }));
+    const bytes = await exportPdf(
+      [
+        ref(src, 0, { annotations: [textAnn({ text: 'OnlyA' })] }),
+        ref(src, 1, { annotations: [textAnn({ text: 'OnlyB' })] }),
+        ref(src, 2), // same copyPages call, no annotations
+        ref(src, 0), // duplicate of an annotated page, no annotations
+      ],
+      sourcesOf(src),
+    );
+    const texts = await getPageTexts(bytes);
+    expect(texts).toHaveLength(4);
+    expect(texts[0]).toContain('OnlyA');
+    expect(texts[0]).not.toContain('OnlyB');
+    expect(texts[1]).toContain('OnlyB');
+    expect(texts[1]).not.toContain('OnlyA');
+    expect(texts[2]).toBe('Page 1');
+    expect(texts[3]).toBe('Page 1');
+    const doc = await loadWithPdfLib(bytes);
+    for (const page of doc.getPages()) {
+      const content = pageContent(doc, page);
+      expect(graphicsStateBalance(content)).toBe(0);
+      expect(content.match(/\bcm\b/g) ?? []).toHaveLength(content.includes('Tm') ? 1 : 0); // one wrapper per annotated page
+    }
+  });
+
+  it('exports pages whose Resources are inherited from the page tree', async () => {
+    const src = await importFile('inherited-res.pdf', await makeStructuredPdf({ inherited: { Resources: true } }));
+    const highlighter = { opacity: 0.5, blendMode: 'Multiply' as const };
+    const bytes = await exportPdf(
+      [
+        ref(src, 0, { annotations: [inkAnn(highlighter), textAnn({ text: 'OnA' })] }),
+        ref(src, 1, { annotations: [inkAnn(highlighter), textAnn({ text: 'OnB' })] }),
+      ],
+      sourcesOf(src),
+    );
+    expect(await getPageTexts(bytes)).toEqual(['Page 1 OnA', 'Page 2 OnB']);
+    const doc = await loadWithPdfLib(bytes);
+    for (const page of doc.getPages()) {
+      expect(pageResources(doc, page, 'ExtGState').size).toBeGreaterThan(0);
+      expect(graphicsStateBalance(pageContent(doc, page))).toBe(0);
+    }
+  });
+
   it('round-trips PDF, image and blank sources together', async () => {
     const pdf = await labeledSource(1);
     const img = await importFile('wide.png', makePng(200, 100));
@@ -184,6 +232,10 @@ describe('exportPdf — page operations', () => {
 
     const titled = await loadWithPdfLib(await exportPdf([ref(src, 0)], sourcesOf(src), { title: 'My title' }));
     expect(titled.getTitle()).toBe('My title');
+
+    // A blank title option falls back to the source name instead of writing "".
+    const blank = await loadWithPdfLib(await exportPdf([ref(src, 0)], sourcesOf(src), { title: '   ' }));
+    expect(blank.getTitle()).toBe('report.pdf');
   });
 
   it('exports 200 pages (with duplicates) quickly', async () => {
@@ -305,6 +357,34 @@ describe('exportPdf — text annotations', () => {
     expect(item).toBeDefined();
     expect(item!.transform[4]).toBeCloseTo(110, 1);
     expect(item!.transform[5]).toBeCloseTo(150 - ascent(10), 1);
+  });
+
+  it('places text correctly when MediaBox, CropBox and Rotate are inherited from the page tree', async () => {
+    const box = { x0: 50, y0: 50, x1: 350, y1: 450 };
+    const src = await importFile(
+      'inherited.pdf',
+      await makeStructuredPdf({
+        pageCount: 1,
+        inherited: { MediaBox: [0, 0, 400, 500], CropBox: [box.x0, box.y0, box.x1, box.y1], Rotate: 90 },
+      }),
+    );
+    expect(src.pages[0]).toEqual({ width: 300, height: 400, rotation: 90 });
+    const ann = textAnn({ x: 10, y: 50, fontSize: 20, text: 'Mark' });
+    const bytes = await exportPdf([ref(src, 0, { annotations: [ann] })], sourcesOf(src));
+    const matrix = displayToUserMatrix(box, 90);
+    const expected = applyMatrix(matrix, { x: ann.x, y: ann.y - ascent(ann.fontSize) });
+    const item = await findText(bytes, 1, 'Mark');
+    expect(item).toBeDefined();
+    const t = item!.transform;
+    expect(t[4]).toBeCloseTo(expected.x, 1);
+    expect(t[5]).toBeCloseTo(expected.y, 1);
+    expect(t[0]).toBeCloseTo(matrix[0] * ann.fontSize, 3);
+    expect(t[1]).toBeCloseTo(matrix[1] * ann.fontSize, 3);
+    expect(t[2]).toBeCloseTo(matrix[2] * ann.fontSize, 3);
+    expect(t[3]).toBeCloseTo(matrix[3] * ann.fontSize, 3);
+    const view = await getPageView(bytes, 1);
+    expect(view.rotate).toBe(90);
+    expect(view.view).toEqual([box.x0, box.y0, box.x1, box.y1]);
   });
 
   it('lays out multiple lines with the shared line height', async () => {
@@ -465,6 +545,27 @@ describe('exportPdf — ink, rect and image annotations', () => {
     for (const page of doc.getPages()) expect(pageResources(doc, page, 'XObject').size).toBeGreaterThan(0);
   });
 
+  it('skips non-finite coordinates instead of writing NaN into the content stream', async () => {
+    const { content, plainContent } = await exportWith([
+      inkAnn({
+        strokes: [
+          [{ x: 1, y: 1 }, { x: Number.NaN, y: 5 }, { x: 9, y: Number.POSITIVE_INFINITY }, { x: 9, y: 9 }],
+          [{ x: Number.NaN, y: 0 }],
+        ],
+      }),
+      rectAnn({ x: Number.NaN }),
+      textAnn({ y: Number.POSITIVE_INFINITY, text: 'Nope' }),
+      imageAnn({ width: Number.NaN }),
+    ]);
+    expect(content).not.toMatch(/NaN|Infinity/);
+    // The finite points of the first stroke are still drawn, nothing else is.
+    expect(content).toMatch(/1 1 m\s+9 9 l\s+S/);
+    expect(content.match(/\bre\b/g) ?? []).toHaveLength(plainContent.match(/\bre\b/g)?.length ?? 0);
+    expect(content.match(/\bTj\b/g) ?? []).toHaveLength(plainContent.match(/\bTj\b/g)?.length ?? 0);
+    expect(content).not.toMatch(/\bDo\b/);
+    expect(graphicsStateBalance(content)).toBe(0);
+  });
+
   it('rejects malformed image annotations with a clear error', async () => {
     const src = await labeledSource(1);
     await expect(
@@ -512,5 +613,17 @@ describe('sanitizeForFont', () => {
     expect(sanitizeForFont('Plain ASCII — café €', font)).toBe('Plain ASCII — café €');
     expect(sanitizeForFont('a😀b中c', font)).toBe('a?b?c');
     expect(sanitizeForFont('tab\there\u0007bell', font)).toBe('tab    herebell');
+  });
+
+  it('normalizes decomposed characters and drops invisible format characters', async () => {
+    const { PDFDocument, StandardFonts } = await import('pdf-lib');
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    // "e" + combining acute (NFD, as produced by some keyboards/OSes) becomes "é".
+    expect(sanitizeForFont('café', font)).toBe('café');
+    // Zero-width space / joiner / BOM are not drawn as "?".
+    expect(sanitizeForFont('a​b‍c﻿', font)).toBe('abc');
+    // A visible unsupported character is still replaced.
+    expect(sanitizeForFont('x☃y', font)).toBe('x?y');
   });
 });

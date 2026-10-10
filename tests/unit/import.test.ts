@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankPageSource, importFile } from '@/core/import';
 import { detectFileKind, parseDataUrl } from '@/core/pdf-utils';
-import { FAKE_WEBP, TINY_JPEG, TINY_PNG, makeEmptyPdf, makeEncryptedPdf, makePdf, toDataUrl } from '../helpers/make-pdf';
+import {
+  FAKE_WEBP,
+  TINY_JPEG,
+  TINY_PNG,
+  makeEmptyPdf,
+  makeEncryptedPdf,
+  makePdf,
+  makeStructuredPdf,
+  toDataUrl,
+} from '../helpers/make-pdf';
 import { makePng } from '../helpers/make-png';
 import { countImageXObjects, loadWithPdfLib, pageContent } from '../helpers/pdf-inspect';
 import { getPageView } from '../helpers/pdfjs';
@@ -48,6 +57,27 @@ describe('importFile — PDF', () => {
     const view = await getPageView(bytes, 1);
     expect(src.pages[0]!.width).toBeCloseTo(view.view[2]! - view.view[0]!, 3);
     expect(src.pages[0]!.height).toBeCloseTo(view.view[3]! - view.view[1]!, 3);
+  });
+
+  it('honours MediaBox, CropBox and Rotate inherited from the page tree', async () => {
+    const bytes = await makeStructuredPdf({
+      inherited: { MediaBox: [0, 0, 400, 500], CropBox: [50, 50, 350, 450], Rotate: 90 },
+    });
+    const src = await importFile('inherited.pdf', bytes);
+    expect(src.pages).toEqual([
+      { width: 300, height: 400, rotation: 90 },
+      { width: 300, height: 400, rotation: 90 },
+    ]);
+    const view = await getPageView(bytes, 1);
+    expect(view.rotate).toBe(90);
+    expect(view.view).toEqual([50, 50, 350, 450]);
+  });
+
+  it('treats a /Rotate that is not a multiple of 90 as 0, like pdf.js does', async () => {
+    const bytes = await makeStructuredPdf({ pageCount: 1, inherited: { Rotate: 45 } });
+    const src = await importFile('rot45.pdf', bytes);
+    expect(src.pages[0]!.rotation).toBe(0);
+    expect((await getPageView(bytes, 1)).rotate).toBe(0);
   });
 
   it('detects a PDF by magic bytes regardless of the file extension', async () => {
@@ -168,6 +198,20 @@ describe('pdf-utils', () => {
     expect(detectFileKind(text('zzz'), 'pic.png')).toBe('png');
     expect(detectFileKind(text('zzz'), 'pic.gif')).toBe('unknown');
     expect(detectFileKind(text('zzz'), 'README')).toBe('unknown');
+  });
+
+  it('prefers image signatures over a "%PDF-" marker found inside the file', () => {
+    // A PNG whose metadata mentions "%PDF-" within the first KiB is still a PNG.
+    const png = makePng(2, 2);
+    const marker = text('tEXtComment\0see the %PDF-1.4 spec');
+    const spliced = new Uint8Array(png.length + marker.length);
+    spliced.set(png.subarray(0, 33)); // signature + IHDR chunk
+    spliced.set(marker, 33);
+    spliced.set(png.subarray(33), 33 + marker.length);
+    expect(detectFileKind(spliced, 'photo.png')).toBe('png');
+    expect(detectFileKind(Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, ...text('%PDF-1.4')]), 'x.bin')).toBe('jpeg');
+    // ...while a PDF with leading junk before its header is still a PDF.
+    expect(detectFileKind(text(`${'junk\n'.repeat(20)}%PDF-1.4\n`), 'x.bin')).toBe('pdf');
   });
 
   it('parses base64 data URLs', () => {

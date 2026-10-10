@@ -1,0 +1,59 @@
+# Continuous integration: typecheck, lint, unit tests, renderer + Electron
+# build, Playwright web e2e, and the Electron smoke tests under xvfb.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Check, build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck, lint, unit tests
+        run: npm run check
+
+      - name: Build renderer and Electron bundles
+        run: npm run build
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      # Ubuntu 24.04 runners restrict unprivileged user namespaces, which the
+      # Chromium sandbox (used by Electron) needs. Relax it when the knob exists.
+      - name: Allow unprivileged user namespaces for the Chromium sandbox
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      - name: Web end-to-end tests
+        run: npm run test:e2e
+
+      - name: Electron smoke tests
+        run: xvfb-run -a npm run test:e2e:electron
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14

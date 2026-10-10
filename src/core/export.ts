@@ -21,8 +21,10 @@
 import {
   LineCapStyle,
   LineJoinStyle,
+  PDFArray,
   PDFDocument,
   PDFName,
+  PDFRef,
   StandardFonts,
   beginText,
   concatTransformationMatrix,
@@ -155,7 +157,8 @@ export async function exportPdf(
 
   // ---- metadata ----
   const firstSource = sources[pages[0]!.sourceId];
-  const title = options.title ?? firstSource?.name ?? 'Document';
+  const requested = options.title?.trim();
+  const title = requested ? requested : firstSource?.name ?? 'Document';
   out.setTitle(title);
   out.setProducer('PDF Editor');
   out.setCreator('PDF Editor');
@@ -193,6 +196,7 @@ async function drawAnnotations(
 
   // Own content stream (pdf-lib creates it on the first pushOperators call and
   // wraps the pre-existing content in q/Q streams), then our balanced q ... Q.
+  isolateContents(page);
   page.pushOperators(pushGraphicsState(), concatTransformationMatrix(a, b, c, d, e, f));
   try {
     for (const annotation of annotations) {
@@ -216,6 +220,26 @@ async function drawAnnotations(
   }
 }
 
+/**
+ * Give the page a private, direct /Contents array before pdf-lib normalizes
+ * the page. pdf-lib leaves an *indirect* /Contents array in place and mutates
+ * it when it wraps the original content in q/Q and appends our stream. Pages
+ * copied in the same `copyPages` call keep sharing objects they shared in the
+ * source, so with a shared array the annotations of one page would show up on
+ * every page using it (and the wrapper would nest once per page).
+ */
+function isolateContents(page: PDFPage): void {
+  const key = PDFName.of('Contents');
+  const raw = page.node.get(key);
+  if (!(raw instanceof PDFRef)) return;
+  const resolved = page.doc.context.lookup(raw);
+  if (resolved instanceof PDFArray) page.node.set(key, page.doc.context.obj(resolved.asArray()));
+}
+
+function finite(...values: number[]): boolean {
+  return values.every((v) => Number.isFinite(v));
+}
+
 // ----- text -----
 
 const STANDARD_FONT: Record<StandardFontName, StandardFonts> = {
@@ -236,7 +260,10 @@ function getFont(ctx: ExportContext, name: StandardFontName): Promise<PDFFont> {
 
 /**
  * Standard 14 fonts only support WinAnsi. Replace characters the font cannot
- * encode with "?" (and drop control characters) instead of throwing.
+ * encode with "?" instead of throwing. Text is NFC-normalized first so a
+ * decomposed "e + combining acute" still becomes "é"; control characters and
+ * invisible format characters (zero-width space, joiners, BOM ...) that the
+ * font cannot encode are dropped rather than shown as "?".
  */
 export function sanitizeForFont(
   text: string,
@@ -244,7 +271,7 @@ export function sanitizeForFont(
   memo: Map<string, boolean> = new Map(),
 ): string {
   let outText = '';
-  for (const ch of text.replace(/\t/g, '    ')) {
+  for (const ch of text.normalize('NFC').replace(/\t/g, '    ')) {
     const code = ch.codePointAt(0) ?? 0;
     if (code < 0x20 || code === 0x7f) continue; // control characters
     let ok = memo.get(ch);
@@ -257,7 +284,8 @@ export function sanitizeForFont(
       }
       memo.set(ch, ok);
     }
-    outText += ok ? ch : '?';
+    if (ok) outText += ch;
+    else if (!/\p{Cf}/u.test(ch)) outText += '?';
   }
   return outText;
 }
@@ -268,8 +296,9 @@ async function drawText(
   resources: PageResources,
   ann: TextAnnotation,
 ): Promise<void> {
+  if (!finite(ann.x, ann.y)) return;
   const lines = splitLines(ann.text);
-  if (lines.every((l) => l.length === 0)) return;
+  if (lines.every((l) => l.trim().length === 0)) return;
   const fontSize = ann.fontSize > 0 && Number.isFinite(ann.fontSize) ? ann.fontSize : 12;
 
   const font = await getFont(ctx, ann.font);
@@ -302,7 +331,8 @@ async function drawText(
 // ----- ink -----
 
 function drawInk(page: PDFPage, resources: PageResources, ann: InkAnnotation): void {
-  const strokes = ann.strokes.filter((s) => s.length > 0);
+  // Non-finite points would end up as "NaN" operands and corrupt the stream.
+  const strokes = ann.strokes.map((s) => s.filter((p) => finite(p.x, p.y))).filter((s) => s.length > 0);
   if (strokes.length === 0) return;
   const width = ann.strokeWidth > 0 && Number.isFinite(ann.strokeWidth) ? ann.strokeWidth : 1;
 
@@ -336,8 +366,9 @@ function drawInk(page: PDFPage, resources: PageResources, ann: InkAnnotation): v
 // ----- rect -----
 
 function drawRect(page: PDFPage, resources: PageResources, ann: RectAnnotation): void {
+  if (!finite(ann.x, ann.y, ann.width, ann.height)) return;
   const hasFill = ann.fillColor !== null;
-  const hasStroke = ann.strokeColor !== null && ann.strokeWidth > 0;
+  const hasStroke = ann.strokeColor !== null && ann.strokeWidth > 0 && Number.isFinite(ann.strokeWidth);
   if (!hasFill && !hasStroke) return;
 
   const ops: PDFOperator[] = [pushGraphicsState()];
@@ -370,7 +401,7 @@ function getImage(ctx: ExportContext, dataUrl: string): Promise<PDFImage> {
 }
 
 async function drawImage(ctx: ExportContext, page: PDFPage, ann: ImageAnnotation): Promise<void> {
-  if (!(ann.width > 0) || !(ann.height > 0)) return;
+  if (!finite(ann.x, ann.y, ann.width, ann.height) || !(ann.width > 0) || !(ann.height > 0)) return;
   const image = await getImage(ctx, ann.dataUrl);
   page.drawImage(image, { x: r3(ann.x), y: r3(ann.y), width: r3(ann.width), height: r3(ann.height) });
 }

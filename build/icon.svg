@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- PDF Editor app icon: a sheet with a folded corner, signed with a blue pen stroke. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eaf1fd"/>
+    </linearGradient>
+  </defs>
+  <!-- rounded square background -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)" stroke="#c7d7f5" stroke-width="6"/>
+  <!-- sheet with folded corner -->
+  <path d="M150 92 H304 L378 166 V398 a20 20 0 0 1 -20 20 H170 a20 20 0 0 1 -20 -20 Z"
+        fill="#ffffff" stroke="#2563eb" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M304 92 V146 a20 20 0 0 0 20 20 H378 Z"
+        fill="#dbeafe" stroke="#2563eb" stroke-width="16" stroke-linejoin="round"/>
+  <!-- text lines -->
+  <rect x="190" y="206" width="100" height="16" rx="8" fill="#bfd3f3"/>
+  <rect x="190" y="246" width="150" height="16" rx="8" fill="#bfd3f3"/>
+  <rect x="190" y="286" width="118" height="16" rx="8" fill="#bfd3f3"/>
+  <!-- signature stroke, running off the sheet (white halo keeps it legible over the outline) -->
+  <path d="M106 384 C 138 322, 166 318, 170 372 C 173 410, 206 416, 222 370 C 236 330, 258 334, 262 364
+           C 266 390, 290 392, 306 364 C 318 342, 338 346, 352 362 C 368 380, 396 374, 424 340"
+        fill="none" stroke="#ffffff" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M106 384 C 138 322, 166 318, 170 372 C 173 410, 206 416, 222 370 C 236 330, 258 334, 262 364
+           C 266 390, 290 392, 306 364 C 318 342, 338 346, 352 362 C 368 380, 396 374, 424 340"
+        fill="none" stroke="#2563eb" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- pen nib at the end of the stroke -->
+  <circle cx="424" cy="340" r="13" fill="#1d4ed8"/>
+</svg>

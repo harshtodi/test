@@ -64,6 +64,11 @@
 }
 
 /* items */
+.page-grid-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
 .page-grid-items {
   flex: 1;
   outline: none;
@@ -117,6 +122,10 @@
   opacity: 0.35;
   cursor: grabbing;
 }
+/* other pages of a selection that is being dragged along with the dragged tile */
+.page-thumb.drag-member {
+  opacity: 0.5;
+}
 .page-thumb-preview {
   cursor: grabbing;
   background: var(--panel);
@@ -135,6 +144,13 @@
   width: 100%;
   height: 100%;
   pointer-events: none;
+}
+/* previous thumbnail shown rotated/scaled (inline transform) until the re-render lands */
+.page-thumb-stale {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform-origin: center;
 }
 
 .page-thumb-placeholder {

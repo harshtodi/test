@@ -1,0 +1,321 @@
+/* ---------- toolbar ---------- */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-height: var(--toolbar-h);
+  padding: 6px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 20;
+  user-select: none;
+}
+
+.tb-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.tb-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--border);
+  margin: 0 4px;
+  flex: 0 0 auto;
+}
+
+.tb-spacer {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.toolbar .btn {
+  position: relative;
+}
+.toolbar .btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.tb-label {
+  font-size: 13px;
+}
+
+.tb-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  padding: 0 4px;
+}
+
+.tb-danger:not(:disabled):hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* unsaved-changes marker on the save button */
+.tb-dirty-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--panel);
+}
+
+/* ---------- file name ---------- */
+.tb-filename {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: text;
+  max-width: 260px;
+}
+.tb-filename:hover {
+  background: var(--panel-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+.tb-filename svg {
+  flex: 0 0 auto;
+  opacity: 0.6;
+}
+.tb-filename-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.tb-filename-input {
+  height: 34px;
+  width: 240px;
+  max-width: 50vw;
+  padding: 0 8px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--panel);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* ---------- overflow menu ---------- */
+.tb-menu {
+  position: relative;
+}
+.tb-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 220px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18), var(--shadow);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+}
+.tb-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tb-menu-item:hover:not(:disabled),
+.tb-menu-item:focus-visible {
+  background: var(--panel-2);
+  outline: none;
+}
+.tb-menu-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.tb-menu-item.danger:not(:disabled) {
+  color: var(--danger);
+}
+
+/* ---------- segmented view toggle ---------- */
+.tb-segmented {
+  display: inline-flex;
+}
+.tb-seg {
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 0;
+}
+.tb-seg:first-child {
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+.tb-seg:last-child {
+  border-radius: 0 var(--radius) var(--radius) 0;
+  margin-left: -1px;
+}
+.tb-seg.active {
+  z-index: 1;
+}
+
+/* ---------- pager ---------- */
+.tb-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.tb-page-indicator {
+  min-width: 64px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ---------- split button (sign + caret) ---------- */
+.tb-split {
+  display: inline-flex;
+}
+.tb-split-main {
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+.tb-split-caret {
+  width: 20px;
+  padding: 0;
+  margin-left: -1px;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+/* ---------- tool options ---------- */
+.tb-options {
+  gap: 8px;
+  padding-left: 6px;
+  border-left: 1px solid var(--border);
+  margin-left: 2px;
+}
+.tb-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.tb-select {
+  height: 30px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.tb-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.tb-select-font {
+  max-width: 130px;
+}
+
+.tb-swatches {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px;
+}
+.tb-swatch {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  background: var(--swatch);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.tb-swatch:hover {
+  transform: scale(1.08);
+}
+.tb-swatch.active {
+  box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent);
+}
+.tb-swatch:focus-visible,
+.tb-swatch:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.tb-swatch-custom {
+  background: conic-gradient(#f87171, #fbbf24, #4ade80, #60a5fa, #c084fc, #f87171);
+  display: inline-flex;
+  overflow: hidden;
+}
+.tb-swatch-custom.active {
+  background: var(--swatch);
+}
+.tb-swatch-custom::after {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  background: var(--swatch);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+.tb-swatch-custom input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  padding: 0;
+  border: 0;
+}
+
+/* ---------- zoom ---------- */
+.tb-zoom-level {
+  min-width: 58px;
+  height: 34px;
+  padding: 0 8px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+
+/* ---------- narrow windows: icons only ---------- */
+@media (max-width: 1180px) {
+  /* .tb-hint stays visible: it is the only content of the options group for whiteout/sign */
+  .tb-label {
+    display: none;
+  }
+  .tb-seg {
+    width: 34px;
+    padding: 0;
+    justify-content: center;
+  }
+  .tb-filename {
+    max-width: 160px;
+  }
+}
+@media (max-width: 760px) {
+  .tb-filename {
+    display: none;
+  }
+}

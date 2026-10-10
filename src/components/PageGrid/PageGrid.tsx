@@ -9,7 +9,12 @@
  * store. Pure index/selection math lives in ./helpers.ts.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
+import type {
+  CSSProperties,
+  FocusEvent as ReactFocusEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+} from 'react';
 import { createPortal } from 'react-dom';
 import {
   DndContext,
@@ -49,6 +54,17 @@ function findThumb(root: HTMLElement | null, id: PageId): HTMLElement | null {
   return root.querySelector<HTMLElement>(`[data-testid="page-thumb"][data-page-id="${esc}"]`);
 }
 
+/** The range-selection anchor if it still exists, else the active page. */
+function resolveAnchor(ids: readonly PageId[], anchor: PageId | null, active: PageId | null): PageId | null {
+  return anchor && ids.includes(anchor) ? anchor : active;
+}
+
+/** True when nothing useful has keyboard focus (e.g. the focused tile was just removed). */
+function focusIsLost(): boolean {
+  const el = document.activeElement;
+  return el === null || el === document.body || !el.isConnected;
+}
+
 /** Number of tiles in the first row of the grid (1 in the list variant). */
 export function getColumnCount(list: HTMLElement | null): number {
   if (!list) return 1;
@@ -76,6 +92,8 @@ export function PageGrid({ variant }: { variant: PageGridVariant }) {
   const anchorRef = useRef<PageId | null>(null);
   /** True from drag start until just after drop; suppresses the click that may follow a drag. */
   const draggingRef = useRef(false);
+  /** True while keyboard focus is inside the listbox, so focus can follow the active page when its tile goes away. */
+  const focusInListRef = useRef(false);
   const [activeDragId, setActiveDragId] = useState<PageId | null>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
 
@@ -108,11 +126,26 @@ export function PageGrid({ variant }: { variant: PageGridVariant }) {
   }, [variant]);
 
   // Keep the active page visible when it changes (editor navigation, shortcuts, arrows).
+  // If the list owned keyboard focus and the focused tile disappeared (Delete,
+  // undo), move focus to the new active tile so arrow keys keep working.
   useEffect(() => {
     if (!activePageId) return;
     const el = findThumb(listRef.current, activePageId);
-    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    if (!el) return;
+    if (focusInListRef.current && focusIsLost()) el.focus({ preventScroll: true });
+    if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [activePageId, variant]);
+
+  const onListFocus = () => {
+    focusInListRef.current = true;
+  };
+  const onListBlur = (e: ReactFocusEvent<HTMLDivElement>) => {
+    const next = e.relatedTarget;
+    if (next instanceof Node && listRef.current?.contains(next)) return;
+    // A blur fired because the focused tile was removed from the DOM does not mean the user left the list.
+    if (!next && !e.target.isConnected) return;
+    focusInListRef.current = false;
+  };
 
   // ----- drag & drop -----
 
@@ -151,7 +184,7 @@ export function PageGrid({ variant }: { variant: PageGridVariant }) {
     const additive = e.ctrlKey || e.metaKey;
     if (e.shiftKey) {
       const ids = s.pages.map((p) => p.id);
-      const range = rangeSelect(ids, anchorRef.current ?? s.activePageId, id);
+      const range = rangeSelect(ids, resolveAnchor(ids, anchorRef.current, s.activePageId), id);
       s.selectPages(additive ? unionIds(s.selectedPageIds, range) : range);
     } else {
       s.togglePageSelection(id, additive);
@@ -254,7 +287,7 @@ export function PageGrid({ variant }: { variant: PageGridVariant }) {
     const id = ids[next];
     if (!id) return;
     if (e.shiftKey) {
-      s.selectPages(rangeSelect(ids, anchorRef.current ?? s.activePageId, id));
+      s.selectPages(rangeSelect(ids, resolveAnchor(ids, anchorRef.current, s.activePageId), id));
     } else {
       s.selectPages([id]);
       anchorRef.current = id;
@@ -264,7 +297,8 @@ export function PageGrid({ variant }: { variant: PageGridVariant }) {
   };
 
   const onBackgroundClick = (e: ReactMouseEvent<HTMLDivElement>) => {
-    if (e.target !== e.currentTarget) return;
+    // The click that can follow a drop must not clear the selection that was just moved.
+    if (draggingRef.current || e.target !== e.currentTarget) return;
     useEditorStore.getState().selectPages(EMPTY_SELECTION);
   };
 
@@ -272,7 +306,10 @@ export function PageGrid({ variant }: { variant: PageGridVariant }) {
 
   const dragPage = activeDragId ? pages.find((p) => p.id === activeDragId) : undefined;
   const dragIndex = dragPage ? order.indexOf(dragPage.id) : -1;
-  const dragCount = dragPage && selectedSet.has(dragPage.id) ? Math.max(1, selectedCount) : 1;
+  const dragsSelection = dragPage !== undefined && selectedSet.has(dragPage.id);
+  const dragCount = dragsSelection ? Math.max(1, selectedCount) : 1;
+  // Roving tabindex: the active page is the tabbable tile; fall back to the first page.
+  const tabbableId = activePageId && order.includes(activePageId) ? activePageId : order[0];
   const rootStyle = { '--pg-header-h': `${headerHeight}px` } as CSSProperties;
 
   return (
@@ -378,32 +415,39 @@ export function PageGrid({ variant }: { variant: PageGridVariant }) {
         onDragCancel={finishDrag}
       >
         <SortableContext items={order} strategy={variant === 'grid' ? rectSortingStrategy : verticalListSortingStrategy}>
-          <div
-            ref={listRef}
-            className="page-grid-items"
-            data-testid="page-grid-items"
-            role="listbox"
-            aria-label="Pages"
-            aria-multiselectable="true"
-            onKeyDown={onKeyDown}
-            onClick={onBackgroundClick}
-          >
-            {pages.map((page, index) => (
-              <PageThumbnail
-                key={page.id}
-                page={page}
-                source={sources[page.sourceId]}
-                index={index}
-                thumbWidth={thumbWidth}
-                selected={selectedSet.has(page.id)}
-                active={page.id === activePageId}
-                onClick={handleThumbClick}
-                onDoubleClick={handleThumbDoubleClick}
-                onRotate={handleRotate}
-                onDuplicate={handleDuplicate}
-                onDelete={handleDelete}
-              />
-            ))}
+          {/* `page-grid-list` / `page-grid-grid` are the ids the original stub exposed; kept for existing e2e specs. */}
+          <div className="page-grid-body" data-testid={`page-grid-${variant}`}>
+            <div
+              ref={listRef}
+              className="page-grid-items"
+              data-testid="page-grid-items"
+              role="listbox"
+              aria-label="Pages"
+              aria-multiselectable="true"
+              onKeyDown={onKeyDown}
+              onClick={onBackgroundClick}
+              onFocus={onListFocus}
+              onBlur={onListBlur}
+            >
+              {pages.map((page, index) => (
+                <PageThumbnail
+                  key={page.id}
+                  page={page}
+                  source={sources[page.sourceId]}
+                  index={index}
+                  thumbWidth={thumbWidth}
+                  selected={selectedSet.has(page.id)}
+                  active={page.id === activePageId}
+                  tabbable={page.id === tabbableId}
+                  dragMember={dragsSelection && page.id !== activeDragId && selectedSet.has(page.id)}
+                  onClick={handleThumbClick}
+                  onDoubleClick={handleThumbDoubleClick}
+                  onRotate={handleRotate}
+                  onDuplicate={handleDuplicate}
+                  onDelete={handleDelete}
+                />
+              ))}
+            </div>
           </div>
         </SortableContext>
         {typeof document !== 'undefined' &&

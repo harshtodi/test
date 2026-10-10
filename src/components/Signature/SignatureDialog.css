@@ -1,0 +1,325 @@
+/* ---------- signature dialog ---------- */
+.sig-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(17, 24, 39, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.sig-dialog {
+  width: min(680px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px 20px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  outline: none;
+}
+
+.sig-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.sig-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+/* tabs */
+.sig-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+}
+.sig-tab {
+  padding: 8px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-weight: 500;
+}
+.sig-tab:hover {
+  color: var(--text);
+}
+.sig-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.sig-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+.sig-panel[hidden] {
+  display: none;
+}
+
+.sig-pad {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* The pad is always white so dark ink reads the same as on paper, in both themes. */
+.sig-canvas-wrap {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.sig-draw-wrap {
+  aspect-ratio: 3 / 1;
+  max-width: 600px;
+  width: 100%;
+  align-self: center;
+  /* keep the content box exactly 600x200: draw the frame outside the box */
+  border: 0;
+  box-shadow: 0 0 0 1px var(--border);
+}
+.sig-canvas {
+  display: block;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.sig-draw-wrap .sig-canvas {
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+.sig-type-wrap {
+  min-height: 112px;
+  overflow-x: auto;
+  justify-content: flex-start;
+}
+.sig-type-wrap .sig-canvas {
+  margin: 0 auto;
+}
+.sig-upload-wrap {
+  min-height: 120px;
+  padding: 8px;
+}
+.sig-upload-canvas {
+  max-width: 100%;
+  max-height: 220px;
+  width: auto;
+  height: auto;
+}
+.sig-upload-canvas.hidden {
+  display: none;
+}
+
+.sig-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #9ca3af;
+  font-size: 15px;
+  pointer-events: none;
+}
+.sig-baseline {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: 22%;
+  border-bottom: 1px dashed #d1d5db;
+  pointer-events: none;
+}
+
+/* controls under a pad */
+.sig-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.sig-controls-spacer {
+  flex: 1;
+}
+.sig-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.sig-select {
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+}
+.sig-swatches {
+  display: inline-flex;
+  gap: 8px;
+}
+.sig-swatch {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  background: var(--swatch);
+  cursor: pointer;
+}
+.sig-swatch.active {
+  box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent);
+}
+.sig-swatch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sig-text-input {
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-size: 15px;
+}
+.sig-text-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.sig-upload-label {
+  align-self: flex-start;
+  position: relative;
+  overflow: hidden;
+}
+.sig-upload-label input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.sig-upload-name {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.sig-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.sig-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+/* saved signatures */
+.sig-saved {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.sig-saved-heading {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.sig-saved-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+.sig-saved-entry {
+  position: relative;
+}
+.sig-saved-item {
+  width: 100%;
+  height: 56px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.sig-saved-item:hover,
+.sig-saved-item:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
+}
+.sig-saved-item img {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+.sig-saved-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+.sig-saved-remove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* footer */
+.sig-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+.sig-footer-hint {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 560px) {
+  .sig-footer-hint {
+    display: none;
+  }
+}

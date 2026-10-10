@@ -45,14 +45,17 @@ function indexOfAscii(bytes: Uint8Array, needle: string, limit: number): number 
 
 /**
  * Detect the file kind from magic bytes, falling back to the file extension.
- * PDFs may have junk before the `%PDF-` header, so it is searched for within
- * the first KiB (pdf-lib tolerates such files as well).
+ * Image signatures sit at offset 0 and are checked first; PDFs may have junk
+ * before the `%PDF-` header, so that marker is searched for within the first
+ * KiB (pdf-lib tolerates such files as well). Checking images first keeps a
+ * PNG/JPEG that happens to contain "%PDF-" in a metadata chunk from being
+ * mistaken for a PDF.
  */
 export function detectFileKind(bytes: Uint8Array, name: string): FileKind {
-  if (indexOfAscii(bytes, '%PDF-', 1024) >= 0) return 'pdf';
   if (startsWith(bytes, PNG_SIGNATURE)) return 'png';
   if (startsWith(bytes, [0xff, 0xd8, 0xff])) return 'jpeg';
   if (startsWith(bytes, [0x52, 0x49, 0x46, 0x46]) && startsWith(bytes, [0x57, 0x45, 0x42, 0x50], 8)) return 'webp';
+  if (indexOfAscii(bytes, '%PDF-', 1024) >= 0) return 'pdf';
 
   const ext = /\.([a-z0-9]+)$/i.exec(name.trim())?.[1]?.toLowerCase();
   switch (ext) {
