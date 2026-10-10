@@ -1,0 +1,15 @@
+node_modules/
+dist/
+dist-electron/
+release/
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.vite/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+tmp/

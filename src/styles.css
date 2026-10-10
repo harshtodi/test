@@ -1,0 +1,209 @@
+/* ---------- design tokens ---------- */
+:root {
+  --bg: #f3f4f6;
+  --panel: #ffffff;
+  --panel-2: #f9fafb;
+  --border: #e5e7eb;
+  --text: #111827;
+  --text-muted: #6b7280;
+  --accent: #2563eb;
+  --accent-soft: #dbeafe;
+  --danger: #dc2626;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.1);
+  --radius: 8px;
+  --toolbar-h: 52px;
+  --sidebar-w: 220px;
+  font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  color: var(--text);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111318;
+    --panel: #1b1e25;
+    --panel-2: #232730;
+    --border: #2f3440;
+    --text: #e5e7eb;
+    --text-muted: #9ca3af;
+    --accent: #60a5fa;
+    --accent-soft: #1e3a5f;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  overflow: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* ---------- layout ---------- */
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.sidebar {
+  width: var(--sidebar-w);
+  flex: 0 0 var(--sidebar-w);
+  border-right: 1px solid var(--border);
+  background: var(--panel-2);
+  overflow-y: auto;
+}
+
+.editor-pane,
+.grid-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+}
+
+/* ---------- buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--panel);
+  cursor: pointer;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.btn:hover {
+  background: var(--panel-2);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn-primary:hover {
+  filter: brightness(1.05);
+  background: var(--accent);
+}
+.btn-icon {
+  padding: 6px;
+  width: 34px;
+  height: 34px;
+  justify-content: center;
+}
+.btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ---------- empty state ---------- */
+.empty-state {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.empty-card {
+  max-width: 460px;
+  text-align: center;
+  padding: 40px 32px;
+  border: 2px dashed var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+}
+.empty-icon {
+  font-size: 48px;
+}
+.empty-card h1 {
+  font-size: 20px;
+  margin: 12px 0 8px;
+}
+.empty-card p {
+  color: var(--text-muted);
+  margin: 0 0 16px;
+}
+.empty-card .hint {
+  font-size: 12px;
+  margin: 16px 0 0;
+}
+
+/* ---------- drop overlay ---------- */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(37, 99, 235, 0.12);
+  border: 3px dashed var(--accent);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+  pointer-events: none;
+}
+.drop-overlay-card {
+  background: var(--panel);
+  padding: 16px 24px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  font-weight: 600;
+}
+
+/* ---------- notice ---------- */
+.notice {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--bg);
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  z-index: 1100;
+  cursor: pointer;
+  max-width: 80vw;
+}
+.notice-error {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* ---------- generic ---------- */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
