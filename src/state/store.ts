@@ -54,6 +54,8 @@ export interface EditorState {
   future: Snapshot[];
   /** Non-fatal messages for the UI to display (toast). */
   notice: { id: string; kind: 'info' | 'error'; message: string } | null;
+  /** Whether the signature picker dialog is open. */
+  signatureDialogOpen: boolean;
 
   // ----- document -----
   /** Add an imported source and append (or insert) all of its pages. Returns new page ids. */
@@ -97,6 +99,7 @@ export interface EditorState {
   markSaved: () => void;
   notify: (kind: 'info' | 'error', message: string) => void;
   clearNotice: () => void;
+  setSignatureDialogOpen: (open: boolean) => void;
 }
 
 function clonePages(pages: PageRef[]): PageRef[] {
@@ -141,6 +144,7 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
   past: [],
   future: [],
   notice: null,
+  signatureDialogOpen: false,
 
   addSource: (source, insertAt) => {
     const newPages: PageRef[] = [];
@@ -361,6 +365,7 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
   markSaved: () => set({ dirty: false }),
   notify: (kind, message) => set({ notice: { id: newId('n'), kind, message } }),
   clearNotice: () => set({ notice: null }),
+  setSignatureDialogOpen: (open) => set({ signatureDialogOpen: open }),
 }));
 
 function reconcileActive(pages: PageRef[], active: PageId | null): PageId | null {
