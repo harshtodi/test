@@ -202,15 +202,26 @@ export function formatPageIndicator(index: number, total: number): string {
   return `${index + 1} / ${total}`;
 }
 
-/**
- * Pages a page-level toolbar action applies to: in grid view the selection
- * (when there is one), otherwise the page shown in the editor.
- */
-export function targetPageIds(s: {
+export interface PageTargetState {
   viewMode: 'editor' | 'grid';
   selectedPageIds: PageId[];
   activePageId: PageId | null;
-}): PageId[] {
-  if (s.viewMode === 'grid' && s.selectedPageIds.length) return s.selectedPageIds;
+}
+
+/**
+ * Pages a page-level toolbar action applies to: the selection when there is
+ * one (in either view: the editor's sidebar supports multi-selection too and
+ * its own header acts on the whole selection), otherwise the active page.
+ */
+export function targetPageIds(s: PageTargetState): PageId[] {
+  if (s.selectedPageIds.length) return s.selectedPageIds;
   return s.activePageId ? [s.activePageId] : [];
+}
+
+/** Noun for the page-action tooltips: what {@link targetPageIds} will act on. */
+export function targetPageWord(s: PageTargetState): 'current page' | 'selected page' | 'selected pages' {
+  const ids = targetPageIds(s);
+  if (ids.length > 1) return 'selected pages';
+  if (ids.length === 1 && ids[0] !== s.activePageId) return 'selected page';
+  return 'current page';
 }

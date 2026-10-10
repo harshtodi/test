@@ -31,6 +31,27 @@ export function pageContent(doc: PDFDocument, page: PDFPage): string {
 }
 
 /**
+ * Like {@link pageContent}, but with every `/Name Do` that paints a Form
+ * XObject replaced by that form's (decoded) content, recursively. The exporter
+ * moves a page's original content into such a form, so this is what a viewer
+ * effectively executes for the page.
+ */
+export function pageContentInlined(doc: PDFDocument, page: PDFPage): string {
+  const inline = (content: string, resources: PDFDict | undefined, depth: number): string => {
+    if (depth > 8 || !resources) return content;
+    const xobjects = resources.lookupMaybe(PDFName.of('XObject'), PDFDict);
+    if (!xobjects) return content;
+    return content.replace(/\/([^\s/[\]<>(){}%]+)\s+Do\b/g, (match, name: string) => {
+      const form = doc.context.lookup(xobjects.get(PDFName.of(name)));
+      if (!(form instanceof PDFStream) || form.dict.get(PDFName.of('Subtype')) !== PDFName.of('Form')) return match;
+      const own = form.dict.lookupMaybe(PDFName.of('Resources'), PDFDict);
+      return `\n${inline(streamText(form), own ?? resources, depth + 1)}\n`;
+    });
+  };
+  return inline(pageContent(doc, page), page.node.Resources(), 0);
+}
+
+/**
  * Names → dicts of a resource category (e.g. 'ExtGState', 'XObject', 'Font')
  * on a page. For stream resources (images) the stream's dictionary is returned.
  */

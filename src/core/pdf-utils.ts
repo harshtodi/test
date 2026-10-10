@@ -2,7 +2,8 @@
  * Small pdf-lib helpers shared by import.ts and export.ts. Pure TypeScript,
  * no DOM, safe to run in Node (unit tests) and in the renderer.
  */
-import type { PDFPage } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFName, PDFPageLeaf, PDFPageTree, PDFRef } from 'pdf-lib';
+import type { PDFDocument, PDFObject, PDFPage } from 'pdf-lib';
 import type { Rotation } from './types';
 import { normalizeRotation } from './geometry';
 
@@ -142,6 +143,19 @@ export function getPageRotation(page: PDFPage): Rotation {
   return normalizeRotation(angle);
 }
 
+/**
+ * Error message for encrypted files. pdf-lib cannot decrypt, not even files
+ * with an empty user password (owner password only), which every viewer opens
+ * without prompting; so tell the user what to do rather than to "remove" a
+ * password they never typed.
+ */
+export function encryptedMessage(name: string): string {
+  return (
+    `${name} is encrypted, even if it opens without asking for a password. ` +
+    `Save an unencrypted copy first (for example with your PDF viewer's "Print to PDF" or "Save as"), then open that copy here`
+  );
+}
+
 /** Decode a base64 string to bytes (works in browsers, Electron and Node). */
 export function base64ToBytes(b64: string): Uint8Array {
   const clean = b64.replace(/\s+/g, '');
@@ -170,4 +184,56 @@ export function parseDataUrl(dataUrl: string): ParsedDataUrl {
     throw new Error('Image annotation has a malformed data URL payload');
   }
   return { mime, bytes };
+}
+
+/**
+ * Make pdf-lib enumerate the same pages as pdf.js.
+ *
+ * pdf-lib only treats dictionaries with `/Type /Pages` as tree nodes and
+ * `/Type /Page` as page leaves (anything else is skipped, or breaks the
+ * traversal when it is the root). pdf.js, like Acrobat, accepts nodes without
+ * a `/Type` and treats every kid without `/Kids` as a page. A file with such a
+ * leaf would otherwise render fine but import with fewer pages, so page *i* on
+ * screen would be a different page than page *i* in the saved file.
+ *
+ * Replaces untyped nodes with proper `PDFPageTree` / `PDFPageLeaf` objects in
+ * place. Must run right after `PDFDocument.load`, before the first `getPages()`
+ * call (pdf-lib caches the page list).
+ */
+export function repairPageTree(doc: PDFDocument): void {
+  const { context } = doc;
+  const kidsKey = PDFName.of('Kids');
+  const typeKey = PDFName.of('Type');
+  const visited = new Set<PDFObject>();
+
+  const visit = (entry: PDFObject | undefined, replace: (fixed: PDFDict) => void): void => {
+    const node = entry instanceof PDFRef ? context.lookup(entry) : entry;
+    if (!(node instanceof PDFDict)) return;
+    const seenAs = entry instanceof PDFRef ? entry : node;
+    if (visited.has(seenAs)) return; // cycles never end well
+    visited.add(seenAs);
+
+    let current: PDFDict = node;
+    if (!(node instanceof PDFPageLeaf) && (!(node instanceof PDFPageTree) || !node.has(kidsKey))) {
+      const map = new Map(node.entries());
+      if (node.has(kidsKey)) {
+        map.set(typeKey, PDFName.of('Pages'));
+        current = PDFPageTree.fromMapWithContext(map, context);
+      } else {
+        map.set(typeKey, PDFName.of('Page'));
+        current = PDFPageLeaf.fromMapWithContext(map, context);
+      }
+      if (entry instanceof PDFRef) context.assign(entry, current);
+      else replace(current);
+    }
+
+    if (current instanceof PDFPageTree) {
+      const kids = current.lookupMaybe(kidsKey, PDFArray);
+      if (!kids) return;
+      for (let i = 0; i < kids.size(); i++) visit(kids.get(i), (fixed) => kids.set(i, fixed));
+    }
+  };
+
+  const pagesKey = PDFName.of('Pages');
+  visit(doc.catalog.get(pagesKey), (fixed) => doc.catalog.set(pagesKey, fixed));
 }

@@ -50,9 +50,13 @@ let mainWindow: BrowserWindow | null = null;
 /** Windows the user chose to close without saving. */
 const forceClose = new WeakSet<BrowserWindow>();
 
-// macOS: files opened via Finder / dock, possibly before `ready`.
+// macOS: files opened via Finder / dock, possibly before `ready`. The app keeps
+// running after its last window is closed, and a Finder open does not emit
+// `activate`, so create the window here when none exists (before `ready` the
+// paths wait in the opener until onReady's window attaches). Mirrors 'second-instance'.
 app.on('open-file', (event, file) => {
   event.preventDefault();
+  if (!opener.hasWindow && app.isReady()) createMainWindow();
   void opener.openPaths(collectFilePaths(['', file]));
 });
 

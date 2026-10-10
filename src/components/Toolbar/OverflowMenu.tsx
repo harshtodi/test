@@ -12,7 +12,8 @@ export interface MenuItem {
 
 /**
  * A small dropdown behind a "more" button. Closes on outside click, Escape,
- * or after an item is selected. Arrow keys move between items.
+ * Tab (focus continues from the toggle button), or after an item is selected.
+ * Arrow keys move between items.
  */
 export function OverflowMenu({ items, children, label, testId }: { items: MenuItem[]; children: ReactNode; label: string; testId: string }) {
   const [open, setOpen] = useState(false);
@@ -80,6 +81,12 @@ export function OverflowMenu({ items, children, label, testId }: { items: MenuIt
             } else if (e.key === 'ArrowUp') {
               e.preventDefault();
               moveFocus(-1);
+            } else if (e.key === 'Tab') {
+              // Leaving with the keyboard closes the menu. Focus is moved to the
+              // toggle synchronously (no preventDefault), so the browser's own
+              // Tab / Shift+Tab continues from there to the next / previous control.
+              setOpen(false);
+              buttonRef.current?.focus();
             }
           }}
         >
@@ -91,6 +98,8 @@ export function OverflowMenu({ items, children, label, testId }: { items: MenuIt
               className={`tb-menu-item${item.danger ? ' danger' : ''}`}
               data-testid={item.testId}
               disabled={item.disabled}
+              // Roving focus (open → first item, arrows): items are not in the Tab order.
+              tabIndex={-1}
               onClick={() => {
                 setOpen(false);
                 // the item is about to unmount: hand focus back to the toggle

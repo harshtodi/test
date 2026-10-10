@@ -103,5 +103,5 @@ jobs:
             Unsigned builds. **macOS:** right-click the app and choose *Open* the first time
             (or run `xattr -dr com.apple.quarantine "/Applications/PDF Editor.app"`).
             **Windows:** if SmartScreen appears, choose *More info* → *Run anyway*.
-            **Linux:** `chmod +x PDF-Editor-*.AppImage` or install the `.deb`.
+            **Linux:** `chmod +x pdf-editor-*.AppImage` or install the `.deb`.
             See `docs/INSTALL.md` for details.

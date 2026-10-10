@@ -13,20 +13,27 @@ import {
 import type { SavedSignature, StorageLike } from '@/components/Signature/signature-store';
 
 /** Minimal in-memory localStorage stand-in. */
-function fakeStorage(initial: Record<string, string> = {}): StorageLike & { data: Map<string, string>; failNextSet: number } {
+function fakeStorage(
+  initial: Record<string, string> = {},
+): StorageLike & { data: Map<string, string>; failNextSet: number; maxValueLength: number; failRemove: boolean } {
   const data = new Map(Object.entries(initial));
   const store = {
     data,
     failNextSet: 0,
+    /** Writes longer than this "exceed the quota" (and leave the old value in place, like the real thing). */
+    maxValueLength: Infinity,
+    failRemove: false,
     getItem: (k: string) => (data.has(k) ? data.get(k)! : null),
     setItem: (k: string, v: string) => {
       if (store.failNextSet > 0) {
         store.failNextSet--;
         throw new DOMException('quota', 'QuotaExceededError');
       }
+      if (v.length > store.maxValueLength) throw new DOMException('quota', 'QuotaExceededError');
       data.set(k, v);
     },
     removeItem: (k: string) => {
+      if (store.failRemove) throw new DOMException('blocked', 'SecurityError');
       data.delete(k);
     },
   };
@@ -180,5 +187,41 @@ describe('storage round trip', () => {
     expect(stored).toHaveLength(2);
     expect(stored.map((s) => s.dataUrl)).toEqual([png('s3'), png('s2')]);
     expect(loadSignatures(storage)).toEqual(stored);
+  });
+
+  it('keeps the stored list untouched when not even the newest entry fits', () => {
+    const storage = fakeStorage();
+    let list: SavedSignature[] = [];
+    for (let i = 0; i < 3; i++) list = saveSignature(storage, sig(`s${i}`), i);
+    const before = storage.data.get(SIGNATURES_KEY)!;
+    expect(list).toHaveLength(3);
+
+    // The quota is a little above what is stored: the new one alone is already too big.
+    storage.maxValueLength = before.length + 50;
+    const huge = sig('x'.repeat(2000), 1600, 400);
+    const stored = saveSignature(storage, huge, 99);
+
+    expect(stored).toEqual(list); // what the dialog will list: the three old ones, not nothing
+    expect(stored.some((s) => s.dataUrl === huge.dataUrl)).toBe(false);
+    expect(storage.data.get(SIGNATURES_KEY)).toBe(before);
+    expect(loadSignatures(storage)).toEqual(list);
+  });
+
+  it('still evicts old entries when the newest one fits on its own', () => {
+    const storage = fakeStorage();
+    for (let i = 0; i < 3; i++) saveSignature(storage, sig(`s${i}`), i);
+    expect(loadSignatures(storage)).toHaveLength(3);
+    const big = sig('y'.repeat(300), 800, 200);
+    storage.maxValueLength = JSON.stringify(addToList([], big, 99)).length + 20;
+    const stored = saveSignature(storage, big, 99);
+    expect(stored.map((s) => s.dataUrl)).toEqual([big.dataUrl]);
+    expect(loadSignatures(storage)).toEqual(stored);
+  });
+
+  it('reports what is still stored when removing the last entry fails', () => {
+    const storage = fakeStorage();
+    const [a] = saveSignature(storage, sig('a'), 1);
+    storage.failRemove = true;
+    expect(removeSignature(storage, a!.id)).toEqual([a]);
   });
 });

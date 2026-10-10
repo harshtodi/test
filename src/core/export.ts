@@ -8,13 +8,15 @@
  *    pdf-lib reuses already-copied objects within one call and two page
  *    leaves must not share mutable state.
  * 2. `/Rotate` is set to (source rotation + user rotation).
- * 3. Annotations are drawn inside their own content stream as
+ * 3. The page's original content is moved into a Form XObject and the page's
+ *    own content becomes `q /PEfm1 Do Q`: a viewer restores its graphics state
+ *    stack when a form ends, so a `q` the original content never closed (or an
+ *    extra `Q`) cannot shift the matrix our annotations are drawn with.
+ * 4. Annotations are drawn inside their own content stream as
  *    `q <cm> ... Q`, where `cm` is {@link displayToUserMatrix} for the page's
  *    visible box and total rotation. Everything is therefore drawn in display
  *    space exactly as stored, and comes out upright for the viewer regardless
- *    of rotation. pdf-lib wraps the original content in `q`/`Q` streams when
- *    we add ours, so graphics state left unbalanced by the original content
- *    cannot leak into the annotations.
+ *    of rotation.
  *
  * Pure TypeScript, no DOM: runs in Node under Vitest.
  */
@@ -22,13 +24,19 @@ import {
   LineCapStyle,
   LineJoinStyle,
   PDFArray,
+  PDFDict,
   PDFDocument,
   PDFName,
+  PDFRawStream,
   PDFRef,
+  PDFStream,
+  ParseSpeeds,
   StandardFonts,
   beginText,
   concatTransformationMatrix,
+  decodePDFRawStream,
   degrees,
+  drawObject,
   endPath,
   endText,
   fill,
@@ -50,7 +58,7 @@ import {
   showText,
   stroke,
 } from 'pdf-lib';
-import type { PDFFont, PDFImage, PDFOperator, PDFPage } from 'pdf-lib';
+import type { PDFFont, PDFImage, PDFObject, PDFOperator, PDFPage, PDFPageLeaf } from 'pdf-lib';
 import type {
   Annotation,
   BlendMode,
@@ -66,15 +74,29 @@ import type {
   TextAnnotation,
 } from './types';
 import { addRotation, displayToUserMatrix } from './geometry';
-import { ascent, lineHeight, splitLines } from './text-metrics';
-import { getPageRotation, getVisibleBox, parseDataUrl } from './pdf-utils';
+import { ascent, lineHeight, sanitizeText, splitLines } from './text-metrics';
+import type { SanitizeStats } from './text-metrics';
+import { encryptedMessage, getPageRotation, getVisibleBox, parseDataUrl, repairPageTree } from './pdf-utils';
 
 export interface ExportOptions {
-  /** Document title metadata. Defaults to the first source's file name. */
+  /**
+   * Document title metadata, used when the first source has no Title of its
+   * own. Defaults to the first source's file name.
+   */
   title?: string;
+  /**
+   * When given, non-fatal problems are appended here (one message each), e.g.
+   * text annotations containing characters the built-in fonts cannot show.
+   */
+  warnings?: string[];
 }
 
-const LOAD_OPTIONS = { ignoreEncryption: true, updateMetadata: false } as const;
+/**
+ * `Fastest` disables pdf-lib's `setTimeout(0)` yield every 100 parsed objects
+ * (browsers clamp nested timers to 4 ms, which made saves of object-heavy
+ * files ~10x slower while the UI stayed blocked between ticks anyway).
+ */
+const LOAD_OPTIONS = { ignoreEncryption: true, updateMetadata: false, parseSpeed: ParseSpeeds.Fastest } as const;
 
 /** Shared, lazily-created resources for one export run. */
 interface ExportContext {
@@ -83,6 +105,8 @@ interface ExportContext {
   /** Code points each font can encode, memoized per font. */
   encodable: Map<StandardFontName, Map<string, boolean>>;
   images: Map<string, Promise<PDFImage>>;
+  /** Characters replaced with "?" because no built-in font has them. */
+  text: SanitizeStats;
 }
 
 /** Per-page resource keys so fonts/ExtGStates are registered once per page. */
@@ -131,9 +155,11 @@ export async function exportPdf(
 
   // ---- copy pages ----
   const copied: (PDFPage | undefined)[] = new Array<PDFPage | undefined>(pages.length);
+  let firstDoc: PDFDocument | undefined;
   for (const [sourceId, rounds] of groups) {
     const source = sources[sourceId]!;
     const srcDoc = await loadSource(source);
+    if (sourceId === pages[0]!.sourceId) firstDoc = srcDoc;
     for (const group of rounds.values()) {
       const result = await out.copyPages(srcDoc, group.indices);
       for (let i = 0; i < result.length; i++) copied[group.positions[i]!] = result[i];
@@ -141,7 +167,7 @@ export async function exportPdf(
   }
 
   // ---- assemble, rotate, annotate ----
-  const ctx: ExportContext = { out, fonts: new Map(), encodable: new Map(), images: new Map() };
+  const ctx: ExportContext = { out, fonts: new Map(), encodable: new Map(), images: new Map(), text: { replaced: 0 } };
   for (let i = 0; i < pages.length; i++) {
     const ref = pages[i]!;
     const page = copied[i];
@@ -156,17 +182,57 @@ export async function exportPdf(
   }
 
   // ---- metadata ----
+  // Keep the first source's bibliographic metadata; its Title wins over the
+  // output file name so an edited report is not retitled "report-edited".
   const firstSource = sources[pages[0]!.sourceId];
-  const requested = options.title?.trim();
-  const title = requested ? requested : firstSource?.name ?? 'Document';
+  const info = firstDoc ? readInfo(firstDoc) : {};
+  const title = info.title || options.title?.trim() || firstSource?.name || 'Document';
   out.setTitle(title);
+  if (info.author) out.setAuthor(info.author);
+  if (info.subject) out.setSubject(info.subject);
+  if (info.keywords) out.setKeywords([info.keywords]); // one element: keeps the string verbatim
   out.setProducer('PDF Editor');
   out.setCreator('PDF Editor');
   const now = new Date();
   out.setCreationDate(now);
   out.setModificationDate(now);
 
-  return out.save();
+  if (ctx.text.replaced > 0 && options.warnings) options.warnings.push(replacedWarning(ctx.text.replaced));
+
+  // objectsPerTick: Infinity — no setTimeout(0) every 50 objects (see LOAD_OPTIONS).
+  return out.save({ objectsPerTick: Number.POSITIVE_INFINITY });
+}
+
+interface SourceInfo {
+  title?: string;
+  author?: string;
+  subject?: string;
+  keywords?: string;
+}
+
+/** Title/Author/Subject/Keywords of a source, skipping entries that are missing or malformed. */
+function readInfo(doc: PDFDocument): SourceInfo {
+  const read = (get: () => string | undefined): string | undefined => {
+    try {
+      const value = get()?.trim();
+      return value ? value : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  return {
+    title: read(() => doc.getTitle()),
+    author: read(() => doc.getAuthor()),
+    subject: read(() => doc.getSubject()),
+    keywords: read(() => doc.getKeywords()),
+  };
+}
+
+function replacedWarning(count: number): string {
+  const one = count === 1;
+  return `${count} character${one ? '' : 's'} ${one ? 'is' : 'are'} not available in the built-in PDF fonts and ${
+    one ? 'was' : 'were'
+  } replaced with "?"`;
 }
 
 async function loadSource(source: SourceDoc): Promise<PDFDocument> {
@@ -176,7 +242,9 @@ async function loadSource(source: SourceDoc): Promise<PDFDocument> {
   } catch {
     throw new Error(`"${source.name}" could not be read: it is not a valid PDF file or it is damaged`);
   }
-  if (doc.isEncrypted) throw new Error(`"${source.name}" is password protected; remove the password first`);
+  if (doc.isEncrypted) throw new Error(encryptedMessage(`"${source.name}"`));
+  // Same page enumeration as the importer (and pdf.js): must precede getPages().
+  repairPageTree(doc);
   return doc;
 }
 
@@ -194,9 +262,9 @@ async function drawAnnotations(
   const [a, b, c, d, e, f] = displayToUserMatrix(box, totalRotation);
   const resources: PageResources = { fonts: new Map(), graphicsStates: new Map() };
 
-  // Own content stream (pdf-lib creates it on the first pushOperators call and
-  // wraps the pre-existing content in q/Q streams), then our balanced q ... Q.
-  isolateContents(page);
+  // Original content into a Form XObject (or at least its own q/Q wrapper),
+  // then our own content stream with a balanced q <cm> ... Q.
+  isolateOriginalContent(page);
   page.pushOperators(pushGraphicsState(), concatTransformationMatrix(a, b, c, d, e, f));
   try {
     for (const annotation of annotations) {
@@ -221,12 +289,116 @@ async function drawAnnotations(
 }
 
 /**
- * Give the page a private, direct /Contents array before pdf-lib normalizes
- * the page. pdf-lib leaves an *indirect* /Contents array in place and mutates
- * it when it wraps the original content in q/Q and appends our stream. Pages
- * copied in the same `copyPages` call keep sharing objects they shared in the
- * source, so with a shared array the annotations of one page would show up on
- * every page using it (and the wrapper would nest once per page).
+ * Move the page's original content into a Form XObject `/PEfmN` and make the
+ * page's own content `q /PEfmN Do Q`.
+ *
+ * pdf-lib wraps pre-existing content in `q`/`Q` streams when a stream is
+ * appended, but that neutralises exactly one unmatched `q`; a `cm` or clip
+ * followed by a single unclosed `q` (or an extra `Q`) still leaks into our
+ * annotation stream and shifts everything we draw. Viewers restore the whole
+ * graphics state stack when a form XObject ends, so inside a form the original
+ * content can be as unbalanced as it likes.
+ *
+ * Runs before pdf-lib normalizes the page: the wrapper stream is installed as
+ * /Contents first, then the form is registered (which normalizes and wraps the
+ * wrapper — harmless). Falls back to {@link isolateContents} and pdf-lib's own
+ * wrapper when a content stream cannot be read.
+ */
+function isolateOriginalContent(page: PDFPage): void {
+  const { context } = page.doc;
+  let form: PDFRawStream;
+  try {
+    const streams = originalContentStreams(page);
+    if (streams.length === 0) return; // nothing to isolate
+    const dict = context.obj({ Type: 'XObject', Subtype: 'Form', BBox: formBBox(page) });
+    const resources = inheritedEntry(page.node, PDFName.of('Resources'));
+    if (resources) dict.set(PDFName.of('Resources'), resources);
+    if (streams.length === 1) {
+      // Keep the bytes and their filter as they are: no decode/re-encode.
+      const only = streams[0]!;
+      for (const key of ['Filter', 'DecodeParms']) {
+        const value = only.dict.get(PDFName.of(key));
+        if (value) dict.set(PDFName.of(key), value);
+      }
+      form = PDFRawStream.of(dict, only.contents);
+    } else {
+      // Streams may only be split at token boundaries, so a newline joins them.
+      const parts = streams.map((s) => decodePDFRawStream(s).decode());
+      const joined = new Uint8Array(parts.reduce((n, p) => n + p.length + 1, 0));
+      let offset = 0;
+      for (const part of parts) {
+        joined.set(part, offset);
+        offset += part.length;
+        joined[offset++] = 0x0a;
+      }
+      const flate = context.flateStream(joined);
+      for (const [key, value] of dict.entries()) flate.dict.set(key, value);
+      form = flate;
+    }
+  } catch {
+    isolateContents(page);
+    return;
+  }
+
+  const name = unusedXObjectName(page);
+  const wrapper = context.register(context.contentStream([pushGraphicsState(), drawObject(name), popGraphicsState()]));
+  page.node.set(PDFName.of('Contents'), wrapper);
+  page.node.setXObject(name, context.register(form)); // normalizes: /Contents becomes [q, wrapper, Q]
+}
+
+/** The page's content streams in order; throws when one is not a plain stream. */
+function originalContentStreams(page: PDFPage): PDFRawStream[] {
+  const contents = page.node.Contents();
+  if (!contents) return [];
+  const { context } = page.doc;
+  const items = contents instanceof PDFArray ? contents.asArray().map((item) => context.lookup(item)) : [contents];
+  return items.map((item) => {
+    if (item instanceof PDFRawStream) return item;
+    if (item instanceof PDFStream) throw new Error('content stream is not a raw stream');
+    if (item === undefined) throw new Error('content stream is missing');
+    throw new Error('content stream is not a stream');
+  });
+}
+
+/** Form bounding box: the MediaBox (never clips anything visible), or a box no page exceeds. */
+function formBBox(page: PDFPage): number[] {
+  try {
+    const m = page.getMediaBox();
+    if (finite(m.x, m.y, m.width, m.height) && m.width !== 0 && m.height !== 0) {
+      return [Math.min(m.x, m.x + m.width), Math.min(m.y, m.y + m.height), Math.max(m.x, m.x + m.width), Math.max(m.y, m.y + m.height)];
+    }
+  } catch {
+    /* fall through */
+  }
+  return [-32767, -32767, 32767, 32767];
+}
+
+/** The raw (ref or direct) value of an inheritable page attribute. */
+function inheritedEntry(node: PDFPageLeaf, key: PDFName): PDFObject | undefined {
+  let value: PDFObject | undefined;
+  node.ascend((n) => {
+    if (value === undefined) value = n.get(key);
+  });
+  return value;
+}
+
+/** `/PEfm1`, `/PEfm2`, ... — the first name not already used by the page's XObject resources. */
+function unusedXObjectName(page: PDFPage): PDFName {
+  const xobjects = page.node.Resources()?.lookupMaybe(PDFName.of('XObject'), PDFDict);
+  let n = 1;
+  let name = PDFName.of(`PEfm${n}`);
+  while (xobjects?.has(name)) name = PDFName.of(`PEfm${++n}`);
+  return name;
+}
+
+/**
+ * Fallback isolation: give the page a private, direct /Contents array before
+ * pdf-lib normalizes the page. pdf-lib leaves an *indirect* /Contents array in
+ * place and mutates it when it wraps the original content in q/Q and appends
+ * our stream. Pages copied in the same `copyPages` call keep sharing objects
+ * they shared in the source, so with a shared array the annotations of one
+ * page would show up on every page using it (and the wrapper would nest once
+ * per page).
  */
 function isolateContents(page: PDFPage): void {
   const key = PDFName.of('Contents');
@@ -259,21 +431,18 @@ function getFont(ctx: ExportContext, name: StandardFontName): Promise<PDFFont> {
 }
 
 /**
- * Standard 14 fonts only support WinAnsi. Replace characters the font cannot
- * encode with "?" instead of throwing. Text is NFC-normalized first so a
- * decomposed "e + combining acute" still becomes "é"; control characters and
- * invisible format characters (zero-width space, joiners, BOM ...) that the
- * font cannot encode are dropped rather than shown as "?".
+ * Standard 14 fonts only support WinAnsi. Make `text` drawable with `font`
+ * instead of throwing: see {@link sanitizeText} for the rules (NFC first,
+ * invisible characters and marks dropped, NFKC compatibility forms, "?" for
+ * the rest). `stats.replaced` counts the "?" substitutions.
  */
 export function sanitizeForFont(
   text: string,
   font: PDFFont,
   memo: Map<string, boolean> = new Map(),
+  stats?: SanitizeStats,
 ): string {
-  let outText = '';
-  for (const ch of text.normalize('NFC').replace(/\t/g, '    ')) {
-    const code = ch.codePointAt(0) ?? 0;
-    if (code < 0x20 || code === 0x7f) continue; // control characters
+  const canEncode = (ch: string): boolean => {
     let ok = memo.get(ch);
     if (ok === undefined) {
       try {
@@ -284,10 +453,9 @@ export function sanitizeForFont(
       }
       memo.set(ch, ok);
     }
-    if (ok) outText += ch;
-    else if (!/\p{Cf}/u.test(ch)) outText += '?';
-  }
-  return outText;
+    return ok;
+  };
+  return sanitizeText(text, canEncode, stats);
 }
 
 async function drawText(
@@ -320,7 +488,7 @@ async function drawText(
   const top = ann.y - ascent(fontSize);
   const lh = lineHeight(fontSize);
   for (let i = 0; i < lines.length; i++) {
-    const line = sanitizeForFont(lines[i]!, font, memo);
+    const line = sanitizeForFont(lines[i]!, font, memo, ctx.text);
     if (line.length === 0) continue;
     ops.push(setTextMatrix(1, 0, 0, 1, r3(ann.x), r3(top - i * lh)), showText(font.encodeText(line)));
   }

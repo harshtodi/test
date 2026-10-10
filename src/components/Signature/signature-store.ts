@@ -124,8 +124,10 @@ export function removeFromList(list: SavedSignature[], id: string): SavedSignatu
 
 /**
  * Write the list. When the storage quota is exceeded the oldest entries are
- * dropped one by one until the write succeeds. Returns what was actually
- * stored (an empty list when nothing could be written).
+ * dropped one by one until the write succeeds. Returns what is actually
+ * stored afterwards: when not even the newest entry fits, the stored list is
+ * left untouched (a failed `setItem` keeps the previous value) and that
+ * previous list is returned rather than wiping it.
  */
 export function writeSignatures(storage: StorageLike | null | undefined, list: SavedSignature[]): SavedSignature[] {
   if (!storage) return [];
@@ -136,7 +138,8 @@ export function writeSignatures(storage: StorageLike | null | undefined, list: S
       else storage.setItem(SIGNATURES_KEY, JSON.stringify(current));
       return current;
     } catch {
-      if (current.length === 0) return [];
+      // One entry (or a removeItem) failing: report what is still in storage.
+      if (current.length <= 1) return loadSignatures(storage);
       current = current.slice(0, -1);
     }
   }

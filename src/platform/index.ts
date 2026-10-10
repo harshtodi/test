@@ -61,7 +61,11 @@ interface FilePickerWindow extends Window {
   showSaveFilePicker?: (opts: {
     suggestedName?: string;
     types?: { description: string; accept: Record<string, string[]> }[];
-  }) => Promise<{ createWritable(): Promise<{ write(d: BufferSource | Blob): Promise<void>; close(): Promise<void> }> }>;
+  }) => Promise<{
+    /** The file name the user confirmed in the dialog (may differ from the suggestion). */
+    name: string;
+    createWritable(): Promise<{ write(d: BufferSource | Blob): Promise<void>; close(): Promise<void> }>;
+  }>;
 }
 
 /** localStorage key; set to "download" to bypass the native save picker (used by e2e tests). */
@@ -90,7 +94,7 @@ const webPlatform: Platform = {
         const writable = await handle.createWritable();
         await writable.write(blob);
         await writable.close();
-        return { saved: true, location: suggestedName };
+        return { saved: true, location: handle.name || suggestedName };
       } catch (err) {
         if ((err as DOMException)?.name === 'AbortError') return { saved: false };
         // fall through to download

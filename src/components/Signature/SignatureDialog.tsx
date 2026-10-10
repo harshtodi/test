@@ -89,7 +89,15 @@ function SignatureDialogBody() {
     (img: SignatureImage, remember: boolean) => {
       setCurrentSignature({ dataUrl: img.dataUrl, width: img.width, height: img.height });
       setTool('signature');
-      if (remember) setSaved(saveSignature(getLocalStorage(), img));
+      if (remember) {
+        const storage = getLocalStorage();
+        const stored = saveSignature(storage, img);
+        setSaved(stored);
+        // Not even alone did it fit in the quota: the older ones were kept instead.
+        if (storage && !stored.some((s) => s.dataUrl === img.dataUrl)) {
+          useEditorStore.getState().notify('info', 'Signature too large to remember for later');
+        }
+      }
       close();
     },
     [setCurrentSignature, setTool, close],
@@ -126,6 +134,10 @@ function SignatureDialogBody() {
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     // The dialog is modal: nothing typed here should reach the global shortcuts.
     e.stopPropagation();
+    // Those shortcuts are also what normally cancels the browser's own
+    // Ctrl+S / Ctrl+O ("Save page as…", file picker); do that part here so the
+    // native dialogs do not open over the modal in the web build.
+    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 's' || e.key.toLowerCase() === 'o')) e.preventDefault();
     if (e.key === 'Escape') {
       e.preventDefault();
       cancel();

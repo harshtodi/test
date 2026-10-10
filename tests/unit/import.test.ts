@@ -1,19 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { createBlankPageSource, importFile } from '@/core/import';
+import { createBlankPageSource, exifRotation, importFile, jpegExifOrientation } from '@/core/import';
+import { getPageGeometry } from '@/core/geometry';
 import { detectFileKind, parseDataUrl } from '@/core/pdf-utils';
 import {
   FAKE_WEBP,
   TINY_JPEG,
   TINY_PNG,
+  jpegWithExif,
   makeEmptyPdf,
   makeEncryptedPdf,
   makePdf,
   makeStructuredPdf,
+  makeUntypedPageTreePdf,
   toDataUrl,
 } from '../helpers/make-pdf';
 import { makePng } from '../helpers/make-png';
 import { countImageXObjects, loadWithPdfLib, pageContent } from '../helpers/pdf-inspect';
-import { getPageView } from '../helpers/pdfjs';
+import { getPageTexts, getPageView, withPdfJs } from '../helpers/pdfjs';
 
 const text = (s: string) => new TextEncoder().encode(s);
 
@@ -86,9 +89,33 @@ describe('importFile — PDF', () => {
     expect(src.pageCount).toBe(1);
   });
 
-  it('rejects password protected PDFs with a friendly message', async () => {
+  it('rejects encrypted PDFs with a message that says what to do', async () => {
+    // Also files with an empty user password (owner password only), which open
+    // everywhere without a prompt: pdf-lib cannot decrypt them either.
     const bytes = await makeEncryptedPdf();
-    await expect(importFile('secret.pdf', bytes)).rejects.toThrow(/password protected; remove the password first/);
+    await expect(importFile('secret.pdf', bytes)).rejects.toThrow(
+      /^secret\.pdf is encrypted, even if it opens without asking for a password\. Save an unencrypted copy first/,
+    );
+    await expect(importFile('secret.pdf', bytes)).rejects.not.toThrow(/remove the password/);
+  });
+
+  it('counts the same pages as pdf.js when page-tree nodes lack /Type', async () => {
+    const cases: [string, Parameters<typeof makeUntypedPageTreePdf>[1]][] = [
+      ['one leaf without /Type /Page', { leaves: [1] }],
+      ['every leaf without /Type /Page', { leaves: 'all' }],
+      ['root without /Type /Pages', { root: true }],
+      ['root and leaves without /Type', { root: true, leaves: 'all' }],
+    ];
+    for (const [name, options] of cases) {
+      const bytes = await makeUntypedPageTreePdf(4, options);
+      const shown = await withPdfJs(bytes, async (pdf) => pdf.numPages);
+      expect(shown, name).toBe(4);
+      const src = await importFile(`${name}.pdf`, bytes);
+      expect(src.pageCount, name).toBe(4);
+      expect(src.pages, name).toEqual(Array.from({ length: 4 }, () => ({ width: 612, height: 792, rotation: 0 })));
+      expect(src.bytes, name).toBe(bytes); // repaired in memory only; the original bytes stay
+      expect(await getPageTexts(bytes)).toEqual(['Original 1', 'Original 2', 'Original 3', 'Original 4']);
+    }
   });
 
   it('rejects corrupt PDFs with a friendly message', async () => {
@@ -152,6 +179,48 @@ describe('importFile — images', () => {
     expect(doc.getPageCount()).toBe(1);
     expect(countImageXObjects(doc)).toBe(1);
     expect(doc.getProducer()).toBe('PDF Editor');
+    expect(doc.getTitle()).toBeUndefined(); // generated sources carry no Title
+  });
+
+  it('honours the EXIF orientation of a JPEG (portrait phone photo stored as landscape pixels)', async () => {
+    // 400x300 pixels, Orientation 6 = rotate 90° clockwise to display: a 300x400 portrait photo.
+    const src = await importFile('phone.jpg', jpegWithExif(TINY_JPEG, 6, 400, 300));
+    expect(src.pages).toEqual([{ width: 792, height: 612, rotation: 90 }]);
+    const page = { id: 'p', sourceId: src.id, sourceIndex: 0, rotation: 0 as const, annotations: [] };
+    const geometry = getPageGeometry(page, src);
+    expect([geometry.displayWidth, geometry.displayHeight]).toEqual([612, 792]); // shown as a portrait Letter page
+    const view = await getPageView(src.bytes, 1);
+    expect(view.rotate).toBe(90);
+    expect(view.view).toEqual([0, 0, 792, 612]);
+    const doc = await loadWithPdfLib(src.bytes);
+    const content = pageContent(doc, doc.getPage(0));
+    expect(content).toMatch(/792 0 0 594 0 0 cm/); // raw landscape pixels fitted to the unrotated page width
+    expect(content).toMatch(/1 0 0 1 0 9 cm/); // (612 - 594) / 2
+  });
+
+  it('maps every EXIF orientation to a /Rotate and leaves untagged JPEGs alone', async () => {
+    const expectations: [number, number, [number, number]][] = [
+      [1, 0, [792, 612]],
+      [3, 180, [792, 612]],
+      [8, 270, [792, 612]],
+      [6, 90, [792, 612]],
+    ];
+    for (const [orientation, rotation, size] of expectations) {
+      const src = await importFile(`o${orientation}.jpg`, jpegWithExif(TINY_JPEG, orientation, 400, 300));
+      expect(src.pages[0], `orientation ${orientation}`).toEqual({ width: size[0], height: size[1], rotation });
+      expect((await getPageView(src.bytes, 1)).rotate).toBe(rotation);
+    }
+    // A portrait photo stored upright stays a portrait page; big-endian TIFF works too.
+    const upright = await importFile('up.jpg', jpegWithExif(TINY_JPEG, 1, 300, 400, 'MM'));
+    expect(upright.pages[0]).toEqual({ width: 612, height: 792, rotation: 0 });
+    const sideways = await importFile('side.jpg', jpegWithExif(TINY_JPEG, 8, 300, 400, 'MM'));
+    expect(sideways.pages[0]).toEqual({ width: 612, height: 792, rotation: 270 }); // displayed landscape
+    expect(jpegExifOrientation(TINY_JPEG)).toBe(1);
+    expect(jpegExifOrientation(jpegWithExif(TINY_JPEG, 7, 10, 10, 'MM'))).toBe(7);
+    expect(jpegExifOrientation(jpegWithExif(TINY_JPEG, 9, 10, 10))).toBe(1); // out of range
+    expect(jpegExifOrientation(new Uint8Array([0xff, 0xd8, 0xff]))).toBe(1);
+    expect(jpegExifOrientation(text('not a jpeg at all'))).toBe(1);
+    expect([1, 2, 3, 4, 5, 6, 7, 8, 0, 42].map(exifRotation)).toEqual([0, 0, 180, 180, 90, 90, 270, 270, 0, 0]);
   });
 
   it('falls back to the extension when there are no magic bytes', async () => {

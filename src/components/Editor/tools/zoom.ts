@@ -1,4 +1,4 @@
-/** Pure zoom helpers for Ctrl/Cmd + wheel. */
+/** Pure zoom helpers: Ctrl/Cmd + wheel, and scroll compensation for every zoom step. */
 
 /** Multiplier applied to the zoom for one wheel event. */
 export function wheelZoomFactor(deltaY: number, deltaMode = 0): number {
@@ -29,4 +29,21 @@ export function scrollDeltaForAnchor(
   scale: number,
 ): { dx: number; dy: number } {
   return { dx: pageLeft + anchor.px * scale - anchor.clientX, dy: pageTop + anchor.py * scale - anchor.clientY };
+}
+
+/**
+ * Anchor for a zoom that has no pointer (toolbar button, keyboard, menu): the
+ * page point at the centre of the scroller's viewport, from the page's rect
+ * and scale *before* the zoom. `scrollDeltaForAnchor` then keeps it there.
+ */
+export function centreAnchor(
+  viewport: { left: number; top: number; width: number; height: number },
+  pageLeft: number,
+  pageTop: number,
+  scale: number,
+): ZoomAnchor {
+  const clientX = viewport.left + viewport.width / 2;
+  const clientY = viewport.top + viewport.height / 2;
+  const s = scale > 0 ? scale : 1;
+  return { clientX, clientY, px: (clientX - pageLeft) / s, py: (clientY - pageTop) / s };
 }

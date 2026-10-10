@@ -4,7 +4,7 @@
  * - `variant="list"`: narrow vertical strip next to the editor.
  * - `variant="grid"`: full-pane CSS grid for arranging the document.
  *
- * Reordering uses dnd-kit (pointer + keyboard sensors); selection, rotation,
+ * Reordering uses dnd-kit (mouse, touch + keyboard sensors); selection, rotation,
  * duplication, deletion and blank-page insertion go straight to the Zustand
  * store. Pure index/selection math lives in ./helpers.ts.
  */
@@ -20,7 +20,8 @@ import {
   DndContext,
   DragOverlay,
   KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   closestCenter,
   useSensor,
   useSensors,
@@ -105,7 +106,13 @@ export function PageGrid({ variant }: { variant: PageGridVariant }) {
   const allSelected = pages.length > 0 && selectedCount === pages.length;
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    // Mouse + touch instead of PointerSensor: `.page-thumb` keeps
+    // `touch-action: manipulation` so a plain pan scrolls the list, but the
+    // browser then fires `pointercancel` as soon as it starts panning and a
+    // pointer-based drag never reaches its activation distance. Touch: press and
+    // hold ~250ms (moving more than 8px first is a scroll), then drag.
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
       // Space picks a page up / drops it; Enter alone opens the page in the editor.
@@ -276,6 +283,17 @@ export function PageGrid({ variant }: { variant: PageGridVariant }) {
         e.preventDefault();
         s.setViewMode('editor');
       }
+      return;
+    }
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      // The list has focus, so Delete means the selected pages in either view
+      // (the global shortcut only does this in grid view; in the editor it would
+      // remove the selected annotation instead). Stop it from also running.
+      const selected = s.selectedPageIds.filter((id) => ids.includes(id));
+      if (selected.length === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      s.removePages(selected);
       return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return;

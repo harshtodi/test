@@ -132,6 +132,41 @@ test.describe('annotations', () => {
     expect(Math.abs(restored!.x - before!.x)).toBeLessThan(3);
   });
 
+  test('changing a colour while typing keeps the text being entered', async ({ page }) => {
+    const box = await layerBox(page);
+    await page.getByTestId('tool-text').click();
+    await page.mouse.click(box.x + box.width * 0.2, box.y + box.height * 0.4);
+    const input = page.getByTestId('text-editor-input');
+    await input.fill('Colour me');
+    await page.getByTestId('opt-color-blue').click();
+    await page.keyboard.type(' now');
+    await page.keyboard.press('Escape');
+    await expect(annotations(page)).toHaveCount(1);
+    const texts = await pageTexts(await saveAndDownload(page));
+    expect(texts[0]).toContain('Colour me now');
+  });
+
+  test('non-Latin text is preserved in the saved file (rasterised fallback)', async ({ page }) => {
+    const box = await layerBox(page);
+    await page.getByTestId('tool-text').click();
+    await page.mouse.click(box.x + box.width * 0.2, box.y + box.height * 0.4);
+    await page.getByTestId('text-editor-input').fill('你好世界 and hello');
+    await page.keyboard.press('Escape');
+    await expect(annotations(page)).toHaveCount(1);
+    const bytes = await saveAndDownload(page);
+    const doc = await PDFDocument.load(bytes);
+    // the text became an image on the page, not a run of '?'
+    const resources = doc.getPage(0).node.Resources();
+    const xobjects = resources?.lookup(PDFName.of('XObject'), PDFDict);
+    const hasImage = (xobjects?.keys() ?? []).some((k) => {
+      const d = xobjects!.lookup(k, PDFDict);
+      return d.get(PDFName.of('Subtype'))?.toString() === '/Image';
+    });
+    expect(hasImage).toBe(true);
+    const texts = await pageTexts(bytes);
+    expect(texts[0]).not.toContain('?');
+  });
+
   test('annotations stay attached to their page when pages are reordered or duplicated', async ({ page }) => {
     const box = await layerBox(page);
     await page.getByTestId('tool-text').click();

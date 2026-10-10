@@ -62,6 +62,22 @@ export function getPdfJsPage(source: SourceDoc, sourceIndex: number): Promise<PD
   return p;
 }
 
+/**
+ * Free what pdf.js keeps per rendered page (operator list, decoded images —
+ * tens of MB for a scanned page) while keeping the page proxy cached. pdf.js
+ * defers the cleanup by itself while a render of that page is still running,
+ * so this is safe to call at any time; the next render re-fetches the data.
+ */
+export async function releasePage(source: SourceDoc, sourceIndex: number): Promise<void> {
+  const p = pageCache.get(`${source.id}:${sourceIndex}`);
+  if (!p) return;
+  try {
+    (await p).cleanup();
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Drop cached pdf.js objects for a source (call when a document is cleared). */
 export async function releaseSource(sourceId: SourceId): Promise<void> {
   const p = docCache.get(sourceId);
@@ -188,6 +204,9 @@ export function getThumbnailDataUrl(page: PageRef, source: SourceDoc, widthPx: n
       if (!result) throw new Error('thumbnail render cancelled');
       return canvas.toDataURL('image/png');
     } finally {
+      // The thumbnail is cached as a small PNG; without this, every page ever
+      // scrolled into view kept its full-resolution decoded images alive.
+      await releasePage(source, page.sourceIndex);
       release();
     }
   })();

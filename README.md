@@ -10,9 +10,9 @@ A desktop PDF editor for Windows, macOS and Linux that also runs in the browser.
 
 | OS | Download |
 | --- | --- |
-| Windows 10/11 | `PDF Editor-<version>-win-x64.exe` (installer) or `…-win-x64-portable.exe` (no install) |
-| macOS 12+ | `PDF Editor-<version>-mac-arm64.dmg` (Apple Silicon) or `…-mac-x64.dmg` (Intel) |
-| Linux | `PDF Editor-<version>-linux-x86_64.AppImage` or `…-linux-amd64.deb` |
+| Windows 10/11 | `pdf-editor-<version>-win-x64.exe` (installer) or `…-win-x64-portable.exe` (no install) |
+| macOS 12+ | `pdf-editor-<version>-mac-arm64.dmg` (Apple Silicon) or `…-mac-x64.dmg` (Intel) |
+| Linux | `pdf-editor-<version>-linux-x86_64.AppImage` or `…-linux-amd64.deb` |
 
 Releases are produced automatically by pushing a tag such as `v0.1.0` (see `.github/workflows/release.yml`).
 

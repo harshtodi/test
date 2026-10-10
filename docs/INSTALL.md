@@ -8,8 +8,8 @@ The builds are **not code-signed** (no Apple Developer / Windows signing
 certificate), so each OS shows a one-time warning the first time you open the
 app. The steps to get past it are below.
 
-File names follow `PDF Editor-<version>-<os>-<arch>.<ext>`, for example
-`PDF Editor-0.1.0-win-x64.exe`.
+File names follow `pdf-editor-<version>-<os>-<arch>.<ext>`, for example
+`pdf-editor-0.1.0-win-x64.exe`.
 
 ## Windows
 
@@ -17,8 +17,8 @@ Two downloads are offered:
 
 | File | What it is |
 | --- | --- |
-| `PDF Editor-<version>-win-x64.exe` (NSIS) | Regular installer. Lets you pick the folder, adds a Start-menu entry, registers `.pdf` "Open with", and can be uninstalled from *Settings → Apps*. Installs per user (no administrator rights needed). |
-| `PDF Editor-<version>-win-x64-portable.exe` | Single executable, nothing is installed. Keep it anywhere (USB stick included) and double-click it. |
+| `pdf-editor-<version>-win-x64.exe` (NSIS) | Regular installer. Lets you pick the folder, adds a Start-menu entry, registers `.pdf` "Open with", and can be uninstalled from *Settings → Apps*. Installs per user (no administrator rights needed). |
+| `pdf-editor-<version>-win-x64-portable.exe` | Single executable, nothing is installed. Keep it anywhere (USB stick included) and double-click it. |
 
 If SmartScreen says *"Windows protected your PC"*: click **More info**, then
 **Run anyway**. This happens because the binary is unsigned, not because
@@ -28,8 +28,8 @@ anything was flagged.
 
 | File | What it is |
 | --- | --- |
-| `PDF Editor-<version>-mac-arm64.dmg` | Apple Silicon (M1 and later). |
-| `PDF Editor-<version>-mac-x64.dmg` | Intel Macs. |
+| `pdf-editor-<version>-mac-arm64.dmg` | Apple Silicon (M1 and later). |
+| `pdf-editor-<version>-mac-x64.dmg` | Intel Macs. |
 | `…-mac-<arch>.zip` | Same app as a zip, for scripted installs. |
 
 Open the `.dmg` and drag **PDF Editor** into *Applications*.
@@ -53,14 +53,14 @@ If you downloaded the Intel build on an Apple Silicon Mac it still runs
 
 | File | What it is |
 | --- | --- |
-| `PDF Editor-<version>-linux-x86_64.AppImage` | Runs on any distribution, nothing to install. |
-| `PDF Editor-<version>-linux-amd64.deb` | Debian / Ubuntu / Mint package. Adds a menu entry and the `.pdf` file association. |
+| `pdf-editor-<version>-linux-x86_64.AppImage` | Runs on any distribution, nothing to install. |
+| `pdf-editor-<version>-linux-amd64.deb` | Debian / Ubuntu / Mint package. Adds a menu entry and the `.pdf` file association. |
 
 AppImage:
 
 ```bash
-chmod +x "PDF Editor-"*.AppImage
-./"PDF Editor-"*.AppImage
+chmod +x pdf-editor-*.AppImage
+./pdf-editor-*.AppImage
 ```
 
 On distributions without FUSE 2 (recent Ubuntu, Fedora) either install it
@@ -70,7 +70,7 @@ with `--appimage-extract-and-run`.
 Debian package:
 
 ```bash
-sudo apt install ./"PDF Editor-"*.deb     # installs to /opt/PDF Editor
+sudo apt install ./pdf-editor-*.deb     # installs to /opt/PDF Editor
 pdf-editor                                 # or use the application menu
 ```
 

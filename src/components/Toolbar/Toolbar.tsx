@@ -8,10 +8,11 @@ import { getPageGeometry } from '@/core/geometry';
 import type { Tool } from '@/core/types';
 import { PAGE_SIZES } from '@/core/types';
 import { SignatureDialog } from '@/components/Signature/SignatureDialog';
+import { blankInsertion } from '@/components/PageGrid/helpers';
 import { FileName } from './FileName';
 import { OverflowMenu } from './OverflowMenu';
 import { ToolOptions } from './ToolOptions';
-import { detectMac, formatPageIndicator, formatZoom, shortcutLabel, targetPageIds } from './helpers';
+import { detectMac, formatPageIndicator, formatZoom, shortcutLabel, targetPageIds, targetPageWord } from './helpers';
 import {
   BlankPageIcon,
   ChevronDownIcon,
@@ -67,12 +68,14 @@ export function Toolbar({ onOpen }: { onOpen: () => void }) {
   const pageCount = useEditorStore((s) => s.pages.length);
   const activeIndex = useEditorStore((s) => s.pages.findIndex((p) => p.id === s.activePageId));
   const dirty = useEditorStore((s) => s.dirty);
+  const busy = useEditorStore((s) => s.busy);
   const canUndo = useEditorStore((s) => s.past.length > 0);
   const canRedo = useEditorStore((s) => s.future.length > 0);
   const viewMode = useEditorStore((s) => s.viewMode);
   const tool = useEditorStore((s) => s.tool);
   const zoom = useEditorStore((s) => s.zoom);
   const hasPageTarget = useEditorStore((s) => targetPageIds(s).length > 0);
+  const pageWord = useEditorStore(targetPageWord);
   const isMac = useMemo(() => detectMac(typeof navigator !== 'undefined' ? navigator : undefined), []);
   const sc = (keys: string) => shortcutLabel(keys, isMac);
 
@@ -113,10 +116,11 @@ export function Toolbar({ onOpen }: { onOpen: () => void }) {
 
   const insertBlank = async () => {
     const s = useEditorStore.getState();
-    const ids = targetPageIds(s);
-    const anchorId = ids[ids.length - 1] ?? null;
-    const index = anchorId ? s.pages.findIndex((p) => p.id === anchorId) : s.pages.length - 1;
-    const page = s.pages[index];
+    // Same anchor rule as the grid header's button: after the last target page
+    // in *document* order (the selection list is in click order), sized like it.
+    const order = s.pages.map((p) => p.id);
+    const { index, refId } = blankInsertion(order, targetPageIds(s), s.activePageId);
+    const page = refId ? s.pages.find((p) => p.id === refId) : undefined;
     let size: { width: number; height: number } = PAGE_SIZES.Letter;
     if (page) {
       const source = s.sources[page.sourceId];
@@ -131,7 +135,7 @@ export function Toolbar({ onOpen }: { onOpen: () => void }) {
     }
     try {
       const source = await createBlankPageSource(size.width, size.height);
-      const newIds = useEditorStore.getState().addSource(source, index + 1);
+      const newIds = useEditorStore.getState().addSource(source, index);
       const after = useEditorStore.getState();
       after.selectPages(newIds);
       const first = newIds[0];
@@ -156,8 +160,6 @@ export function Toolbar({ onOpen }: { onOpen: () => void }) {
     s.setZoom(s.zoom * factor);
   };
 
-  const pageWord = viewMode === 'grid' ? 'selected pages' : 'current page';
-
   return (
     <>
       <header className="toolbar" data-testid="toolbar" role="toolbar" aria-label="Main toolbar">
@@ -173,7 +175,7 @@ export function Toolbar({ onOpen }: { onOpen: () => void }) {
             data-dirty={dirty ? 'true' : 'false'}
             title={`Save (${sc('Ctrl+S')})${dirty ? ' — unsaved changes' : ''}`}
             aria-label={dirty ? 'Save (unsaved changes)' : 'Save'}
-            disabled={!hasPages}
+            disabled={!hasPages || busy !== null}
             onClick={() => void saveDocument()}
           >
             <SaveIcon />
@@ -187,7 +189,7 @@ export function Toolbar({ onOpen }: { onOpen: () => void }) {
                 id: 'save-selected',
                 label: 'Save selected pages as…',
                 testId: 'tb-save-selected',
-                disabled: !hasPages,
+                disabled: !hasPages || busy !== null,
                 onSelect: () => void saveSelectedPages(),
               },
               {

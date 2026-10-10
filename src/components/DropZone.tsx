@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 /**
  * Window-wide file drop. Returns whether a drag with files is in progress so
@@ -6,6 +6,13 @@ import { useEffect, useState } from 'react';
  */
 export function useFileDrop(onFiles: (files: File[]) => void): boolean {
   const [dragging, setDragging] = useState(false);
+  // Keep the latest callback in a ref so the listeners (and the enter/leave
+  // depth counter) are registered once; re-registering on every render reset
+  // the counter mid-drag and made the overlay flicker at element boundaries.
+  const onFilesRef = useRef(onFiles);
+  useEffect(() => {
+    onFilesRef.current = onFiles;
+  }, [onFiles]);
   useEffect(() => {
     let depth = 0;
     const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
@@ -31,7 +38,7 @@ export function useFileDrop(onFiles: (files: File[]) => void): boolean {
       depth = 0;
       setDragging(false);
       const files = e.dataTransfer ? Array.from(e.dataTransfer.files) : [];
-      if (files.length) onFiles(files);
+      if (files.length) onFilesRef.current(files);
     };
     window.addEventListener('dragenter', onEnter);
     window.addEventListener('dragover', onOver);
@@ -43,7 +50,7 @@ export function useFileDrop(onFiles: (files: File[]) => void): boolean {
       window.removeEventListener('dragleave', onLeave);
       window.removeEventListener('drop', onDrop);
     };
-  }, [onFiles]);
+  }, []);
   return dragging;
 }
 

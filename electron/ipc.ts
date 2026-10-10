@@ -5,7 +5,7 @@
 import { BrowserWindow, app, dialog, ipcMain } from 'electron';
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import fs from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { OPEN_DIALOG_FILTERS, SAVE_DIALOG_FILTERS, readOpenedFiles, sanitizeFileName } from './files';
 import type { FileOpener } from './opener';
@@ -113,7 +113,18 @@ async function handleSaveFile(event: IpcMainInvokeEvent, bytes: unknown, suggest
   let filePath = result.filePath;
   if (!/\.pdf$/i.test(filePath)) filePath += '.pdf';
   await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, bytes);
+  // Write a sibling and rename it over the target: writeFile truncates first,
+  // so a failed write (disk full, drive unplugged) would otherwise destroy the
+  // PDF the user is saving over. rename replaces atomically on POSIX and with
+  // MOVEFILE_REPLACE_EXISTING on Windows; on failure the old file is untouched.
+  const tmp = `${filePath}.${process.pid}.tmp`;
+  try {
+    await writeFile(tmp, bytes);
+    await rename(tmp, filePath);
+  } catch (err) {
+    await rm(tmp, { force: true });
+    throw err;
+  }
   rememberDirectory(filePath);
   if (process.platform === 'darwin' && win) win.setRepresentedFilename(filePath);
   return { saved: true, location: filePath };

@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { PDFArray, PDFName } from 'pdf-lib';
-import type { PDFNumber } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFName, PDFStream, StandardFonts } from 'pdf-lib';
+import type { PDFFont, PDFNumber } from 'pdf-lib';
 import { exportPdf, sanitizeForFont } from '@/core/export';
 import { createBlankPageSource, importFile } from '@/core/import';
 import { applyMatrix, displayToUserMatrix, getPageGeometry } from '@/core/geometry';
-import { ascent, lineHeight } from '@/core/text-metrics';
+import { ascent, exportPreviewText, isWinAnsiChar, lineHeight, sanitizeText, splitLines } from '@/core/text-metrics';
 import { newId } from '@/core/ids';
 import type {
   Annotation,
@@ -16,13 +16,23 @@ import type {
   SourceDoc,
   TextAnnotation,
 } from '@/core/types';
-import { TINY_JPEG, TINY_PNG, makeLabeledPdf, makePdf, makeStructuredPdf, toDataUrl } from '../helpers/make-pdf';
+import {
+  TINY_JPEG,
+  TINY_PNG,
+  makeLabeledPdf,
+  makePdf,
+  makePdfWithInfo,
+  makeStructuredPdf,
+  makeUntypedPageTreePdf,
+  toDataUrl,
+} from '../helpers/make-pdf';
 import { makePng } from '../helpers/make-png';
 import {
   countImageXObjects,
   graphicsStateBalance,
   loadWithPdfLib,
   pageContent,
+  pageContentInlined,
   pageResources,
 } from '../helpers/pdf-inspect';
 import { findText, getPageTexts, getPageView, getTextItems, withPdfJs } from '../helpers/pdfjs';
@@ -222,7 +232,7 @@ describe('exportPdf — page operations', () => {
     expect(countImageXObjects(doc)).toBe(1);
   });
 
-  it('sets document metadata', async () => {
+  it('sets document metadata (source without a Title)', async () => {
     const src = await labeledSource(1, 'Report');
     const bytes = await exportPdf([ref(src, 0)], sourcesOf(src));
     const doc = await loadWithPdfLib(bytes);
@@ -236,6 +246,55 @@ describe('exportPdf — page operations', () => {
     // A blank title option falls back to the source name instead of writing "".
     const blank = await loadWithPdfLib(await exportPdf([ref(src, 0)], sourcesOf(src), { title: '   ' }));
     expect(blank.getTitle()).toBe('report.pdf');
+  });
+
+  it('keeps the first source\'s Title, Author, Subject and Keywords', async () => {
+    const report = await importFile(
+      'report.pdf',
+      await makePdfWithInfo({ title: 'Quarterly Report', author: 'Jane Doe', subject: 'Finance', keywords: ['q3,', 'report'] }),
+    );
+    const other = await importFile('other.pdf', await makePdfWithInfo({ title: 'Other', author: 'Someone Else' }));
+    // The output file name must not replace a real title.
+    const doc = await loadWithPdfLib(await exportPdf([ref(report, 0), ref(other, 0)], sourcesOf(report, other), { title: 'report-edited' }));
+    expect(doc.getTitle()).toBe('Quarterly Report');
+    expect(doc.getAuthor()).toBe('Jane Doe');
+    expect(doc.getSubject()).toBe('Finance');
+    expect(doc.getKeywords()).toBe('q3, report'); // verbatim
+    expect(doc.getProducer()).toBe('PDF Editor');
+
+    // The first page decides whose metadata is kept.
+    const swapped = await loadWithPdfLib(await exportPdf([ref(other, 0), ref(report, 0)], sourcesOf(report, other)));
+    expect(swapped.getTitle()).toBe('Other');
+    expect(swapped.getAuthor()).toBe('Someone Else');
+    expect(swapped.getSubject()).toBeUndefined();
+
+    // Generated sources (images, blank pages) carry no Title of their own.
+    const img = await importFile('photo.png', TINY_PNG);
+    const blank = await createBlankPageSource(300, 400);
+    const generated = await loadWithPdfLib(await exportPdf([ref(blank, 0), ref(img, 0)], sourcesOf(img, blank), { title: 'untitled-edited' }));
+    expect(generated.getTitle()).toBe('untitled-edited');
+    expect(generated.getAuthor()).toBeUndefined();
+  });
+
+  it('exports pages in the order pdf.js shows them when page leaves lack /Type', async () => {
+    // Page 2's leaf has no /Type /Page: pdf.js (the renderer) shows four pages;
+    // pdf-lib alone would skip it, so "page 2" would export as "Original 3".
+    const bytes = await makeUntypedPageTreePdf(4, { leaves: [1] });
+    const shown = await getPageTexts(bytes);
+    expect(shown).toEqual(['Original 1', 'Original 2', 'Original 3', 'Original 4']);
+    const src = await importFile('untyped.pdf', bytes);
+    expect(src.pageCount).toBe(4);
+    const out = await exportPdf(
+      [ref(src, 1, { annotations: [textAnn({ text: 'OnTwo' })] }), ref(src, 0), ref(src, 3), ref(src, 2)],
+      sourcesOf(src),
+    );
+    expect(await getPageTexts(out)).toEqual(['Original 2 OnTwo', 'Original 1', 'Original 4', 'Original 3']);
+
+    const rootless = await importFile('rootless.pdf', await makeUntypedPageTreePdf(2, { root: true, leaves: 'all' }));
+    expect(await getPageTexts(await exportPdf([ref(rootless, 1), ref(rootless, 0)], sourcesOf(rootless)))).toEqual([
+      'Original 2',
+      'Original 1',
+    ]);
   });
 
   it('exports 200 pages (with duplicates) quickly', async () => {
@@ -438,6 +497,50 @@ describe('exportPdf — text annotations', () => {
     expect(texts[0]).toContain('Hello ? ? world — café');
   });
 
+  it('reports replaced characters through options.warnings', async () => {
+    const src = await labeledSource(2);
+    const warnings: string[] = [];
+    const bytes = await exportPdf(
+      [
+        ref(src, 0, { annotations: [textAnn({ text: '你好世界' }), textAnn({ text: 'plain ASCII — fine', y: 300 })] }),
+        ref(src, 1, { annotations: [textAnn({ text: 'Привет' })] }),
+      ],
+      sourcesOf(src),
+      { warnings },
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/^10 characters are not available in the built-in PDF fonts and were replaced with "\?"$/);
+    expect((await getPageTexts(bytes))[0]).toContain('????');
+
+    // The on-screen preview helper predicts exactly what was exported.
+    expect(exportPreviewText('你好世界')).toBe('????');
+    expect(exportPreviewText('plain ASCII — fine')).toBe('plain ASCII — fine');
+
+    const none: string[] = [];
+    await exportPdf([ref(src, 0, { annotations: [textAnn({ text: 'ASCII only' })] })], sourcesOf(src), { warnings: none });
+    expect(none).toEqual([]);
+    const single: string[] = [];
+    await exportPdf([ref(src, 0, { annotations: [textAnn({ text: 'one ☃' })] })], sourcesOf(src), { warnings: single });
+    expect(single).toEqual(['1 character is not available in the built-in PDF fonts and was replaced with "?"']);
+  });
+
+  it('breaks lines at U+2028/U+2029 and lays tabs out as four spaces, like the overlay', async () => {
+    const src = await labeledSource(1);
+    const ann = textAnn({ x: 50, y: 700, fontSize: 12, text: 'Alpha\u2028Beta\u2029a\tb' });
+    const bytes = await exportPdf([ref(src, 0, { annotations: [ann] })], sourcesOf(src));
+    await withPdfJs(bytes, async (pdf) => {
+      const items = await getTextItems(pdf, 1);
+      const alpha = items.find((i) => i.str === 'Alpha');
+      const beta = items.find((i) => i.str === 'Beta');
+      expect(alpha).toBeDefined();
+      expect(beta).toBeDefined();
+      expect(beta!.transform[5]).toBeCloseTo(alpha!.transform[5]! - lineHeight(12), 1);
+      expect(items.some((i) => i.str.includes('?'))).toBe(false);
+    });
+    const doc = await loadWithPdfLib(bytes);
+    expect(pageContent(doc, doc.getPage(0))).toMatch(/<612020202062> Tj/); // "a    b"
+  });
+
   it('skips empty text but still exports the page', async () => {
     const src = await labeledSource(1);
     const bytes = await exportPdf([ref(src, 0, { annotations: [textAnn({ text: '' })] })], sourcesOf(src));
@@ -458,8 +561,10 @@ describe('exportPdf — ink, rect and image annotations', () => {
       bytes: annotated,
       doc,
       page: doc.getPage(0),
-      plainContent: pageContent(plainDoc, plainDoc.getPage(0)),
-      content: pageContent(doc, doc.getPage(0)),
+      plainContent: pageContentInlined(plainDoc, plainDoc.getPage(0)),
+      // The original content now lives in a Form XObject: inline it so these
+      // assertions see everything a viewer executes for the page.
+      content: pageContentInlined(doc, doc.getPage(0)),
     };
   }
 
@@ -519,8 +624,10 @@ describe('exportPdf — ink, rect and image annotations', () => {
       imageAnn({ x: 10, y: 20, width: 30, height: 40, dataUrl: toDataUrl(TINY_JPEG, 'image/jpeg') }),
     ]);
     const xobjects = pageResources(doc, page, 'XObject');
-    expect(xobjects.size).toBe(2);
-    for (const x of xobjects.values()) expect(x.get(PDFName.of('Subtype'))).toBe(PDFName.of('Image'));
+    const subtypes = [...xobjects.values()].map((x) => x.get(PDFName.of('Subtype')));
+    expect(subtypes.filter((t) => t === PDFName.of('Image'))).toHaveLength(2);
+    expect(subtypes.filter((t) => t === PDFName.of('Form'))).toHaveLength(1); // the isolated original content
+    expect(xobjects.size).toBe(3);
     expect(countImageXObjects(doc)).toBe(2);
     expect(content).toMatch(/1 0 0 1 300 100 cm/);
     expect(content).toMatch(/120 0 0 40 0 0 cm/);
@@ -577,15 +684,28 @@ describe('exportPdf — ink, rect and image annotations', () => {
   });
 
   it('isolates the annotation layer in its own balanced content stream', async () => {
-    const { doc, page, content } = await exportWith([inkAnn(), rectAnn(), textAnn(), imageAnn()], 90);
+    const { doc, page, content, plainContent } = await exportWith([inkAnn(), rectAnn(), textAnn(), imageAnn()], 90);
     const contents = page.node.Contents();
     expect(contents).toBeInstanceOf(PDFArray);
     const arr = contents as PDFArray;
-    // pdf-lib wraps the original content in q/Q streams, then ours follows.
+    // [q] [q /PEfm1 Do Q] [Q] [ours]: pdf-lib's q/Q wrapper around the form
+    // call that replaced the original content, then our stream.
     expect(arr.size()).toBe(4);
-    const ours = pageContent(doc, page).split('\n').filter(Boolean);
-    expect(ours[0]).toBe('q');
-    expect(ours[ours.length - 1]).toBe('Q');
+    const streams = pageContent(doc, page).split('\n').filter(Boolean);
+    expect(streams[0]).toBe('q');
+    expect(streams[1]).toBe('q');
+    expect(streams[2]).toBe('/PEfm1 Do');
+    expect(streams[3]).toBe('Q');
+    expect(streams[4]).toBe('Q');
+    expect(streams[streams.length - 1]).toBe('Q');
+    // The form carries the original content, the page's MediaBox and resources.
+    const form = doc.context.lookup(page.node.Resources()!.lookup(PDFName.of('XObject'), PDFDict).get(PDFName.of('PEfm1')));
+    expect(form).toBeInstanceOf(PDFStream);
+    const formDict = (form as PDFStream).dict;
+    expect(formDict.get(PDFName.of('Subtype'))).toBe(PDFName.of('Form'));
+    expect((formDict.lookup(PDFName.of('BBox'), PDFArray).asArray() as PDFNumber[]).map((n) => n.asNumber())).toEqual([0, 0, 612, 792]);
+    expect(formDict.lookupMaybe(PDFName.of('Resources'), PDFDict)?.lookupMaybe(PDFName.of('Font'), PDFDict)?.keys().length).toBeGreaterThan(0);
+    expect(content).toContain(plainContent.trim());
     expect(graphicsStateBalance(content)).toBe(0);
     // Our stream starts with q + the display→user matrix for 90°: [0 1 -1 0 612 0]
     expect(content).toMatch(/q\s+0 1 -1 0 612 0 cm/);
@@ -605,25 +725,160 @@ describe('exportPdf — ink, rect and image annotations', () => {
   });
 });
 
+// ---------- original content that leaves the graphics state unbalanced ----------
+
+describe('exportPdf — unbalanced source content', () => {
+  const CASES: [string, string][] = [
+    ['a cm followed by one unmatched q', '1 0 0 1 100 100 cm q BT /F1 36 Tf 50 600 Td (Page 1) Tj ET'],
+    ['two unmatched q', '1 0 0 1 100 100 cm q q BT /F1 36 Tf 50 600 Td (Page 1) Tj ET'],
+    ['a clip followed by an unmatched q', '0 0 10 10 re W n q BT /F1 36 Tf 50 600 Td (Page 1) Tj ET'],
+    ['an extra Q followed by a cm', 'Q 2 0 0 2 0 0 cm BT /F1 18 Tf 25 300 Td (Page 1) Tj ET'],
+    ['content ending inside BT', 'BT /F1 36 Tf 50 600 Td (Page 1) Tj'],
+  ];
+  for (const [name, original] of CASES) {
+    it(`draws annotations at the right place when the original content has ${name}`, async () => {
+      const src = await importFile('q.pdf', await makeStructuredPdf({ pageCount: 1, content: () => original }));
+      const ann = textAnn({ x: 100, y: 500, fontSize: 20, text: 'Mark' });
+      const out = await exportPdf([ref(src, 0, { annotations: [ann, inkAnn()] })], sourcesOf(src));
+      const item = await findText(out, 1, 'Mark');
+      expect(item).toBeDefined();
+      expect(item!.transform[4]).toBeCloseTo(ann.x, 0);
+      expect(item!.transform[5]).toBeCloseTo(ann.y - ascent(ann.fontSize), 0);
+      expect(item!.transform[0]).toBeCloseTo(ann.fontSize, 3);
+      expect((await getPageTexts(out))[0]).toContain('Page 1'); // original content still there
+      const doc = await loadWithPdfLib(out);
+      const page = doc.getPage(0);
+      expect(graphicsStateBalance(pageContent(doc, page))).toBe(0);
+      expect(pageContent(doc, page)).toMatch(/\/PEfm1 Do/);
+    });
+  }
+
+  it('decodes and joins several content streams into one form (and keeps a single one verbatim)', async () => {
+    const two = await importFile('two.pdf', await makeStructuredPdf({ pageCount: 1 }));
+    // Give the page two streams: a `q cm` in one and the text in the other.
+    const doc = await loadWithPdfLib(two.bytes);
+    const page = doc.getPage(0);
+    const first = doc.context.register(doc.context.flateStream('q 1 0 0 1 100 100 cm'));
+    const second = doc.context.register(doc.context.stream('BT /F1 36 Tf 50 600 Td (Page 1) Tj ET'));
+    page.node.set(PDFName.of('Contents'), doc.context.obj([first, second]));
+    const src = await importFile('two.pdf', await doc.save({ useObjectStreams: false }));
+
+    const ann = textAnn({ x: 100, y: 500, fontSize: 20, text: 'Mark' });
+    const out = await exportPdf([ref(src, 0, { annotations: [ann] })], sourcesOf(src));
+    const item = await findText(out, 1, 'Mark');
+    expect(item!.transform[4]).toBeCloseTo(100, 0);
+    expect(item!.transform[5]).toBeCloseTo(500 - ascent(20), 0);
+    const outDoc = await loadWithPdfLib(out);
+    const inlined = pageContentInlined(outDoc, outDoc.getPage(0));
+    expect(inlined).toMatch(/q 1 0 0 1 100 100 cm\s+BT \/F1 36 Tf 50 600 Td \(Page 1\) Tj ET/);
+    expect((await getPageTexts(out))[0]).toContain('Page 1');
+
+    // A single compressed stream keeps its filter (no decode/re-encode).
+    const single = await labeledSource(1);
+    const singleOut = await loadWithPdfLib(await exportPdf([ref(single, 0, { annotations: [ann] })], sourcesOf(single)));
+    const form = singleOut.context.lookup(
+      singleOut.getPage(0).node.Resources()!.lookup(PDFName.of('XObject'), PDFDict).get(PDFName.of('PEfm1')),
+    ) as PDFStream;
+    expect(form.dict.get(PDFName.of('Filter'))).toBe(PDFName.of('FlateDecode'));
+  });
+
+  it('uses distinct form names for pages that share one Resources dictionary', async () => {
+    const src = await importFile('shared-res.pdf', await makeStructuredPdf({ pageCount: 2, inherited: { Resources: true } }));
+    const out = await exportPdf(
+      [ref(src, 0, { annotations: [textAnn({ text: 'A' })] }), ref(src, 1, { annotations: [textAnn({ text: 'B' })] })],
+      sourcesOf(src),
+    );
+    expect(await getPageTexts(out)).toEqual(['Page 1 A', 'Page 2 B']);
+    const doc = await loadWithPdfLib(out);
+    const [p1, p2] = doc.getPages();
+    expect(pageContent(doc, p1!)).toMatch(/\/PEfm1 Do/);
+    expect(pageContent(doc, p2!)).toMatch(/\/PEfm2 Do/);
+    for (const page of doc.getPages()) expect(graphicsStateBalance(pageContentInlined(doc, page))).toBe(0);
+  });
+});
+
+// ---------- text sanitizing ----------
+
+async function helvetica(): Promise<PDFFont> {
+  const { PDFDocument } = await import('pdf-lib');
+  return (await PDFDocument.create()).embedFont(StandardFonts.Helvetica);
+}
+
 describe('sanitizeForFont', () => {
   it('keeps WinAnsi text, replaces the rest with "?" and drops control characters', async () => {
-    const { PDFDocument, StandardFonts } = await import('pdf-lib');
-    const doc = await PDFDocument.create();
-    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const font = await helvetica();
     expect(sanitizeForFont('Plain ASCII — café €', font)).toBe('Plain ASCII — café €');
     expect(sanitizeForFont('a😀b中c', font)).toBe('a?b?c');
     expect(sanitizeForFont('tab\there\u0007bell', font)).toBe('tab    herebell');
   });
 
-  it('normalizes decomposed characters and drops invisible format characters', async () => {
-    const { PDFDocument, StandardFonts } = await import('pdf-lib');
+  it('drops marks and variation selectors, maps compatibility forms, counts replacements', async () => {
+    const font = await helvetica();
+    expect(sanitizeForFont('\u2764\ufe0f', font)).toBe('?'); // red heart + VS16: one symbol, one "?"
+    expect(sanitizeForFont('q\u0303', font)).toBe('q'); // q + combining tilde does not compose: mark dropped, base kept
+    expect(sanitizeForFont('\ufb01ne', font)).toBe('fine'); // ligature "fi"
+    expect(sanitizeForFont('\uff21\uff22', font)).toBe('AB'); // fullwidth
+    expect(sanitizeForFont('\u2460', font)).toBe('1'); // circled digit one
+    expect(sanitizeForFont('x\u20e3', font)).toBe('x'); // enclosing keycap mark alone is dropped
+    const stats = { replaced: 0 };
+    expect(sanitizeForFont('你好 ok 😀\ufe0f', font, new Map(), stats)).toBe('?? ok ?');
+    expect(stats.replaced).toBe(3);
+  });
+
+  it('agrees with the WinAnsi predicate used for previews, for every code point and all four fonts', async () => {
+    const { PDFDocument } = await import('pdf-lib');
     const doc = await PDFDocument.create();
-    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const fonts = await Promise.all(
+      [StandardFonts.Helvetica, StandardFonts.HelveticaBold, StandardFonts.TimesRoman, StandardFonts.Courier].map((f) =>
+        doc.embedFont(f),
+      ),
+    );
+    const mismatches: string[] = [];
+    for (const font of fonts) {
+      for (let cp = 0; cp <= 0xffff; cp++) {
+        if (cp >= 0xd800 && cp <= 0xdfff) continue;
+        const ch = String.fromCodePoint(cp);
+        let encodable = true;
+        try {
+          font.encodeText(ch);
+        } catch {
+          encodable = false;
+        }
+        if (encodable !== isWinAnsiChar(ch)) mismatches.push(`${font.name} U+${cp.toString(16)}`);
+      }
+    }
+    expect(mismatches).toEqual([]);
+    expect(isWinAnsiChar('😀')).toBe(false);
+    expect(isWinAnsiChar('')).toBe(false);
+    expect(isWinAnsiChar('ab')).toBe(false);
+    // ... so the generic sanitizer with the predicate matches the font-backed one.
+    const font = fonts[0]!;
+    for (const sample of ['Plain — café €', 'a😀b中c', '\u2764\ufe0f', 'q\u0303', '\ufb01ne', 'a\u200bb\u200dc\ufeff', 'Ωmega Ελληνικά']) {
+      expect(sanitizeText(sample, isWinAnsiChar)).toBe(sanitizeForFont(sample, font));
+      expect(exportPreviewText(sample)).toBe(sanitizeForFont(sample, font));
+    }
+  });
+
+  it('normalizes decomposed characters and drops invisible format characters', async () => {
+    const font = await helvetica();
     // "e" + combining acute (NFD, as produced by some keyboards/OSes) becomes "é".
     expect(sanitizeForFont('café', font)).toBe('café');
     // Zero-width space / joiner / BOM are not drawn as "?".
     expect(sanitizeForFont('a​b‍c﻿', font)).toBe('abc');
     // A visible unsupported character is still replaced.
     expect(sanitizeForFont('x☃y', font)).toBe('x?y');
+  });
+});
+
+describe('splitLines', () => {
+  it('splits on CRLF, CR, LF and the Unicode line/paragraph separators', () => {
+    expect(splitLines('a\r\nb\rc\nd\u2028e\u2029f')).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
+    expect(splitLines('')).toEqual(['']);
+    expect(splitLines('x\n')).toEqual(['x', '']);
+  });
+
+  it('expands a tab to four spaces so overlay, measurement and export agree', () => {
+    expect(splitLines('a\tb')).toEqual(['a    b']);
+    expect(splitLines('\t\n\t')).toEqual(['    ', '    ']);
   });
 });

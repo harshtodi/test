@@ -6,7 +6,7 @@
  * Children have `pointer-events: none`; the <svg> itself receives every
  * pointer event and useEditorInteractions hit-tests geometrically.
  */
-import { useRef } from 'react';
+import { memo, useRef } from 'react';
 import type { Annotation, PageGeometry, PageRef, TextAnnotation } from '@/core/types';
 import { rgbToCss } from '@/core/color';
 import { ascent, cssFontFamily, cssFontWeight, lineHeight, splitLines } from '@/core/text-metrics';
@@ -43,6 +43,7 @@ export function AnnotationLayer({ page, geometry, scale }: AnnotationLayerProps)
         className="annotation-layer"
         data-testid="annotation-layer"
         data-tool={tool}
+        data-selected={selectedId ?? undefined}
         data-cursor={ix.cursor}
         width={W * scale}
         height={H * scale}
@@ -86,7 +87,12 @@ function classes(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(' ');
 }
 
-function AnnotationShape({ annotation: a, displayHeight: H, selected }: ShapeProps) {
+/**
+ * Memoised: a drag writes one annotation object to the store and every other
+ * annotation keeps its identity, so only the dragged shape (and the one whose
+ * selection flipped) re-renders — not every <path d> of a page full of strokes.
+ */
+const AnnotationShape = memo(function AnnotationShape({ annotation: a, displayHeight: H, selected }: ShapeProps) {
   const common = {
     'data-testid': 'annotation',
     'data-annotation-id': a.id,
@@ -153,7 +159,7 @@ function AnnotationShape({ annotation: a, displayHeight: H, selected }: ShapePro
     case 'text':
       return <TextShape annotation={a} displayHeight={H} selected={selected} common={common} />;
   }
-}
+});
 
 interface TextShapeProps {
   annotation: TextAnnotation;

@@ -61,7 +61,7 @@
   "build": {
     "appId": "com.harshtodi.pdfeditor",
     "productName": "PDF Editor",
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "artifactName": "${name}-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -69,7 +69,8 @@
     "files": [
       "dist/**",
       "dist-electron/**",
-      "package.json"
+      "package.json",
+      "!node_modules/**"
     ],
     "asar": true,
     "mac": {
@@ -127,11 +128,12 @@
       {
         "ext": "pdf",
         "name": "PDF Document",
+        "mimeType": "application/pdf",
         "role": "Editor"
       }
     ],
     "portable": {
-      "artifactName": "${productName}-${version}-${os}-${arch}-portable.${ext}"
+      "artifactName": "${name}-${version}-${os}-${arch}-portable.${ext}"
     },
     "extraResources": [
       {

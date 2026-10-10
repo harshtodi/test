@@ -71,6 +71,13 @@ export function FileName() {
             cancelledRef.current = true;
             restoreFocusRef.current = true;
             setEditing(false);
+          } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+            // Save while renaming: commit the draft first. The store update is
+            // synchronous and React's root handler runs before the window-level
+            // Ctrl+S shortcut, so the save already sees the new name. No
+            // preventDefault here: the global handler owns that.
+            restoreFocusRef.current = true;
+            commit();
           }
         }}
       />

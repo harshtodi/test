@@ -24,8 +24,12 @@ export class FileOpener {
   attach(win: BrowserWindow): void {
     this.window = win;
     this.ready = false;
-    // A reload (dev menu) drops the renderer's listeners: wait for the next renderer:ready.
-    win.webContents.on('did-start-loading', () => {
+    // A committed main-frame navigation (reload, loadURL) replaces the preload
+    // and drops the renderer's listeners: wait for the next renderer:ready.
+    // Not 'did-start-loading': that also fires for navigations the main
+    // process cancels in 'will-navigate' (external links), after which no new
+    // renderer:ready ever arrives and nothing would be delivered again.
+    win.webContents.on('did-navigate', () => {
       if (this.window === win) this.ready = false;
     });
     win.on('closed', () => {

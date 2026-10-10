@@ -95,6 +95,16 @@ test.describe('page management', () => {
     expect(texts).toEqual(['P2', 'P4']);
   });
 
+  test('renaming the output file changes the saved file name', async ({ page }) => {
+    await page.getByTestId('tb-filename').click();
+    const input = page.getByTestId('tb-filename-input');
+    await input.fill('renamed');
+    await input.press('Enter');
+    await expect(page.getByTestId('tb-filename')).toContainText('renamed.pdf');
+    const [download] = await Promise.all([page.waitForEvent('download'), page.keyboard.press('ControlOrMeta+s')]);
+    expect(download.suggestedFilename()).toBe('renamed.pdf');
+  });
+
   test('saves only the selected pages', async ({ page }) => {
     await page.getByTestId('tb-view-grid').click();
     await page.getByTestId('page-thumb').nth(3).click();

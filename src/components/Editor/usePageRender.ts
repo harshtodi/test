@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import type { RefObject } from 'react';
 import type { PageGeometry, PageRef, SourceDoc } from '@/core/types';
-import { renderPageToCanvas } from '@/core/render';
+import { releasePage, renderPageToCanvas } from '@/core/render';
 import { clampPixelRatio } from './tools/canvas-limits';
 import { useDebouncedValue } from './useDebouncedValue';
 
@@ -28,10 +28,21 @@ export function usePageRender(
   geometry: PageGeometry,
   scale: number,
 ): PageRenderState {
-  const renderScale = useDebouncedValue(scale, RENDER_DEBOUNCE_MS);
-  const [state, setState] = useState<PageRenderState>({ status: 'rendering', error: null, renderedScale: null });
   const { id, sourceId, sourceIndex, rotation } = page;
   const { displayWidth, displayHeight } = geometry;
+  // Zoom steps are debounced so the renderer is not thrashed, but another page (or a rotation,
+  // which swaps the display size) must render at its own fit scale from the first frame: a
+  // lagging scale would draw — and size, via render.ts — the bitmap for the previous page.
+  const renderScale = useDebouncedValue(scale, RENDER_DEBOUNCE_MS, `${id}/${rotation}/${displayWidth}x${displayHeight}`);
+  const [state, setState] = useState<PageRenderState>({ status: 'rendering', error: null, renderedScale: null });
+
+  // Free pdf.js's decoded images/operator list for a page once the user has
+  // moved away from it (keyed on the page identity only, not on the scale).
+  useEffect(() => {
+    return () => {
+      void releasePage(source, sourceIndex);
+    };
+  }, [source, sourceIndex]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

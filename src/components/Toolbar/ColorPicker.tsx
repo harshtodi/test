@@ -37,7 +37,12 @@ export function ColorPicker({ swatches, value, onChange, custom = false, label, 
             title={`${label}: ${s.label}`}
             aria-label={`${label}: ${s.label}`}
             data-testid={`${testPrefix}${s.name}`}
-            onClick={() => onChange(s.color)}
+            // Re-picking the active swatch is a no-op: for a selected annotation
+            // every onChange records an undo step, and an empty one makes the
+            // next Undo look broken.
+            onClick={() => {
+              if (!active) onChange(s.color);
+            }}
           />
         );
       })}

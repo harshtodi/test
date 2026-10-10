@@ -5,6 +5,7 @@
  * - pdf.js renders into a <canvas>; an SVG overlay draws annotations in
  *   display space; an inline <textarea> edits text annotations.
  * - Ctrl/Cmd + wheel zooms around the pointer; plain wheel scrolls the pane.
+ *   Toolbar / keyboard / menu zoom keeps the viewport centre in place.
  */
 import { useRef, useState } from 'react';
 import type { PageGeometry, PageRef, SourceDoc } from '@/core/types';
@@ -34,7 +35,7 @@ export function PageEditor() {
   const containerWidth = useElementWidth(rootEl);
   const geometry = page && source ? safeGeometry(page, source) : null;
   const scale = (geometry ? fitScaleFor(containerWidth, geometry.displayWidth) : 1) * zoom;
-  useWheelZoom(rootEl, pageRef, scale);
+  useWheelZoom(rootEl, pageRef, scale, page ? `${page.id}/${page.rotation}` : null);
 
   if (!page) {
     return (
@@ -72,7 +73,8 @@ export function PageEditor() {
             style={{ width: geometry.displayWidth * scale, height: geometry.displayHeight * scale }}
           >
             <PageCanvas page={page} source={source} geometry={geometry} scale={scale} />
-            <AnnotationLayer page={page} geometry={geometry} scale={scale} />
+            {/* Keyed by page: a gesture (or editor) in progress never carries over to another page's geometry. */}
+            <AnnotationLayer key={page.id} page={page} geometry={geometry} scale={scale} />
           </div>
         )}
       </div>

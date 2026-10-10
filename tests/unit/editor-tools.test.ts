@@ -23,7 +23,7 @@ import {
   planTextCommit,
   textEditorFrame,
 } from '@/components/Editor/tools/text-edit';
-import { scrollDeltaForAnchor, wheelZoomFactor } from '@/components/Editor/tools/zoom';
+import { centreAnchor, scrollDeltaForAnchor, wheelZoomFactor } from '@/components/Editor/tools/zoom';
 import { DEFAULT_CANVAS_LIMITS, clampPixelRatio } from '@/components/Editor/tools/canvas-limits';
 import { FIT_PADDING_PX, MIN_FIT_SCALE, fitScaleFor } from '@/components/Editor/tools/fit';
 import { COLORS, DEFAULT_TOOL_SETTINGS } from '@/core/types';
@@ -391,6 +391,21 @@ describe('zoom helpers', () => {
     const anchor = { clientX: 400, clientY: 300, px: 100, py: 50 };
     // page top-left after relayout at (250, 200), new scale 2 → the point is at (450, 300)
     expect(scrollDeltaForAnchor(anchor, 250, 200, 2)).toEqual({ dx: 50, dy: 0 });
+  });
+
+  it('centreAnchor keeps the page point under the viewport centre through a pointer-less zoom step', () => {
+    const viewport = { left: 0, top: 0, width: 1000, height: 700 };
+    // page top-left at (100, -300) at scale 2: the viewport centre (500, 350) is page point (200, 325)
+    const anchor = centreAnchor(viewport, 100, -300, 2);
+    expect(anchor).toEqual({ clientX: 500, clientY: 350, px: 200, py: 325 });
+    // at scale 2.5 that point sits at (100 + 500, -300 + 812.5) before any scroll correction
+    expect(scrollDeltaForAnchor(anchor, 100, -300, 2.5)).toEqual({ dx: 100, dy: 162.5 });
+    // same scale → nothing to correct
+    expect(scrollDeltaForAnchor(anchor, 100, -300, 2)).toEqual({ dx: 0, dy: 0 });
+    // the scroller does not have to start at the viewport origin
+    expect(centreAnchor({ left: 200, top: 50, width: 800, height: 600 }, 200, 50, 1)).toEqual({ clientX: 600, clientY: 350, px: 400, py: 300 });
+    // a non-positive scale (no layout yet) is treated as 1 rather than dividing by zero
+    expect(centreAnchor(viewport, 0, 0, 0)).toEqual({ clientX: 500, clientY: 350, px: 500, py: 350 });
   });
 });
 

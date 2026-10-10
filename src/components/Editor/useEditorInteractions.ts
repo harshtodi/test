@@ -7,7 +7,7 @@
  * (`record=false`) after a single `commitHistory()`, so a whole drag is one
  * undo step. All geometry is display space (points, origin bottom-left).
  */
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, RefObject } from 'react';
 import type {
   Annotation,
@@ -231,10 +231,10 @@ export function useEditorInteractions({ page, geometry, scale, svgRef }: EditorI
 
   // ----- inline text editing -----
 
-  const setEditing = (session: TextEditSession | null) => {
+  const setEditing = useCallback((session: TextEditSession | null) => {
     editingRef.current = session;
     setEditingState(session);
-  };
+  }, []);
 
   const beginEdit = (annotation: TextAnnotation, isNew: boolean) => {
     const store = useEditorStore.getState();
@@ -269,26 +269,46 @@ export function useEditorInteractions({ page, geometry, scale, svgRef }: EditorI
       case 'none':
         break;
     }
-    if (session.isNew) {
-      // Back to the select tool with the new annotation selected.
-      if (store.tool !== 'select') store.setTool('select');
-      if (plan === 'add') store.selectAnnotation(id);
-    } else if (plan !== 'remove') {
-      store.selectAnnotation(id);
-    }
+    // A new text hands over to the select tool — unless another tool was picked while typing
+    // (toolbar click after a <select> kept focus; see the `tool` effect), which stays active.
+    if (session.isNew && store.tool === 'text') store.setTool('select');
+    // Re-select only while the annotation's page is still on screen (a page switch mid-edit
+    // commits to the old page) and the tool shows selections (never under the pen).
+    const { tool: toolNow, activePageId } = useEditorStore.getState();
+    const exists = session.isNew ? plan === 'add' : plan !== 'remove';
+    const selecting = toolNow === 'select' || (!session.isNew && toolNow === 'text');
+    if (exists && selecting && session.pageId === activePageId) store.selectAnnotation(id);
   };
 
   const commitRef = useRef(commitEdit);
   commitRef.current = commitEdit;
 
-  // The active page changed under an open editor (e.g. sidebar navigation): commit to the old page.
+  // Never lose typed text when the layer unmounts (view toggle, document cleared, and — since
+  // the layer is keyed by page — a page switch, which commits to the session's own page).
+  useEffect(() => () => commitRef.current(), []);
+
+  // The toolbar's text options act on the text being typed: a new text follows the tool
+  // defaults live (swatch / font / size), and an existing one follows its store object, which
+  // AnnotationOptions patches. The editor stays open for those clicks (TextEditorOverlay).
   useEffect(() => {
     const session = editingRef.current;
-    if (session && session.pageId !== page.id) commitRef.current();
-  }, [page.id]);
+    if (!session?.isNew) return;
+    const { font, fontSize, textColor: color } = toolSettings;
+    setEditing({ ...session, annotation: { ...session.annotation, font, fontSize, color } });
+  }, [toolSettings, setEditing]);
 
-  // Never lose typed text when the layer unmounts (view toggle, document cleared).
-  useEffect(() => () => commitRef.current(), []);
+  useEffect(() => {
+    const session = editingRef.current;
+    if (!session || session.isNew) return;
+    const live = page.annotations.find((a) => a.id === session.annotation.id);
+    if (live?.type === 'text' && live !== session.annotation) setEditing({ ...session, annotation: live });
+  }, [page.annotations, setEditing]);
+
+  // Another tool was picked while the editor was open (its blur did not commit because focus
+  // had gone to a toolbar <select>): close the editor; commitEdit leaves the new tool active.
+  useEffect(() => {
+    if (tool !== 'text' && editingRef.current) commitRef.current();
+  }, [tool]);
 
   // ----- pointer handlers -----
 
@@ -321,8 +341,11 @@ export function useEditorInteractions({ page, geometry, scale, svgRef }: EditorI
       }
       case 'move':
       case 'resize':
+        if (!it.moved) return;
+        // The browser took the pointer (a touch turned into a pan): put the annotation back.
+        if (cancelled) store.replaceAnnotation(page.id, it.original, false);
         // Final transient update; the undo point was recorded when the drag started.
-        if (it.moved && it.lastPatch) store.updateAnnotation(page.id, it.id, it.lastPatch, false);
+        else if (it.lastPatch) store.updateAnnotation(page.id, it.id, it.lastPatch, false);
         return;
       case 'click': {
         if (cancelled) return;

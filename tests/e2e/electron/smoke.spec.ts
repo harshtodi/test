@@ -10,7 +10,7 @@
 import { _electron as electron, expect, test } from '@playwright/test';
 import type { ElectronApplication, Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -137,6 +137,28 @@ test('openFiles and saveFile round-trip bytes through IPC', async () => {
     const result = await page.evaluate(() => window.pdfEditor!.saveFile(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x0a, 0xff]), 'result.pdf'));
     expect(result).toEqual({ saved: true, location: `${target}.pdf` });
     expect(Array.from(await readFile(`${target}.pdf`))).toEqual([0x25, 0x50, 0x44, 0x46, 0x0a, 0xff]);
+    // The bytes went through a temporary sibling that was renamed over the target.
+    expect(await readdir(path.dirname(target))).toEqual(['saved.pdf']);
+
+    // Saving over an existing file replaces it (the dialog allows overwriting).
+    const replaced = await page.evaluate(() => window.pdfEditor!.saveFile(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x0a, 0x01]), 'result.pdf'));
+    expect(replaced).toEqual({ saved: true, location: `${target}.pdf` });
+    expect(Array.from(await readFile(`${target}.pdf`))).toEqual([0x25, 0x50, 0x44, 0x46, 0x0a, 0x01]);
+
+    // A save that fails after the temporary file was written (here: the chosen
+    // name is taken by a directory, so the rename fails) rejects, leaves the
+    // existing entry alone and cleans up the temporary file.
+    const taken = path.join(scratch, 'out', 'taken.pdf');
+    await mkdir(taken);
+    await app.evaluate(({ dialog }, file) => {
+      dialog.showSaveDialog = (async () => ({ canceled: false, filePath: file })) as typeof dialog.showSaveDialog;
+    }, taken);
+    const failed = await page.evaluate(() =>
+      window.pdfEditor!.saveFile(new Uint8Array([1, 2, 3]), 'x.pdf').then(() => 'resolved', (err: Error) => `rejected: ${err.message}`),
+    );
+    expect(failed).toMatch(/^rejected: /);
+    expect((await readdir(path.dirname(target))).sort()).toEqual(['saved.pdf', 'taken.pdf']);
+    expect((await stat(taken)).isDirectory()).toBe(true);
 
     // Cancelled save.
     await app.evaluate(({ dialog }) => {
@@ -205,6 +227,11 @@ test('a second instance forwards its files to the running window', async () => {
 
   const { app, page, userData } = await launch([first]);
   try {
+    // The document becomes dirty below; answer the close prompt with "Don't
+    // save" up front so a failed assertion cannot leave a native dialog open.
+    await app.evaluate(({ dialog }) => {
+      dialog.showMessageBoxSync = (() => 1) as unknown as typeof dialog.showMessageBoxSync;
+    });
     await expect(page.getByTestId('page-thumb')).toHaveCount(1);
 
     const electronBinary = createRequire(import.meta.url)('electron') as string;
@@ -219,6 +246,71 @@ test('a second instance forwards its files to the running window', async () => {
     // The first instance received the path and appended the pages.
     await expect(page.getByTestId('page-thumb')).toHaveCount(3);
     expect(app.windows()).toHaveLength(1);
+
+    // A navigation the main process denies (external link -> system browser)
+    // starts and stops loading without replacing the document. Delivery must
+    // keep working afterwards: the preload is still the one that reported ready.
+    // (From here on use expect.poll + locator.count(): Playwright's locator
+    // assertions wait for that cancelled navigation to "finish", which Chromium
+    // never reports over CDP, so expect(locator).toHaveCount() would time out.)
+    await app.evaluate(({ shell }) => {
+      const opened: string[] = [];
+      (globalThis as unknown as { __opened: string[] }).__opened = opened;
+      shell.openExternal = (async (url: string) => {
+        opened.push(url);
+      }) as typeof shell.openExternal;
+    });
+    await page.evaluate(() => {
+      const a = document.createElement('a');
+      a.href = 'https://example.org/page';
+      document.body.appendChild(a);
+      a.click();
+    });
+    await expect.poll(() => app.evaluate(() => (globalThis as unknown as { __opened: string[] }).__opened)).toEqual([
+      'https://example.org/page',
+    ]);
+    expect(page.url()).toMatch(/^app:\/\/pdf-editor\//);
+
+    const third = path.join(scratch, 'third.pdf');
+    await writeFile(third, await makeLabeledPdf(1, 'Third'));
+    const again = spawn(electronBinary, ['.', ...sandboxArgs, third], {
+      cwd: repoRoot,
+      env: { ...process.env, VITE_DEV_SERVER_URL: '', PDF_EDITOR_USER_DATA_DIR: userData },
+      stdio: 'ignore',
+    });
+    expect(await new Promise<number | null>((resolve) => again.on('exit', resolve))).toBe(0);
+    await expect.poll(() => page.getByTestId('page-thumb').count()).toBe(4);
+    expect(app.windows()).toHaveLength(1);
+  } finally {
+    await app.close();
+    await rm(userData, { recursive: true, force: true });
+  }
+});
+
+test('open-file with no window left opens a new window showing the file', async () => {
+  // macOS keeps the app running after Cmd+W; a Finder double-click then emits
+  // `open-file` (not `activate`). Simulate that on any platform: drop the
+  // window-all-closed quit, close the only window, then emit open-file.
+  const fixture = path.join(scratch, 'later.pdf');
+  await writeFile(fixture, await makeLabeledPdf(2, 'Later'));
+
+  const { app, page, userData } = await launch();
+  try {
+    await expect(page.getByTestId('empty-state')).toBeVisible();
+    await app.evaluate(({ app }) => {
+      app.removeAllListeners('window-all-closed');
+    });
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close());
+    await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(0);
+
+    const reopened = app.waitForEvent('window');
+    await app.evaluate(({ app }, file) => {
+      app.emit('open-file', { preventDefault() {} }, file);
+    }, fixture);
+    const next = await reopened;
+    await expect(next.getByTestId('app')).toBeVisible();
+    await expect(next.getByTestId('page-thumb')).toHaveCount(2);
+    expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1);
 
     await app.evaluate(({ dialog }) => {
       dialog.showMessageBoxSync = (() => 1) as unknown as typeof dialog.showMessageBoxSync;

@@ -38,17 +38,23 @@ Status legend: `[x]` done · `[~]` in progress (notes say what is left) · `[ ]`
 - **Import** keeps the original PDF bytes; the visible box is CropBox ∩ MediaBox (matches pdf.js `page.view`); a `/Rotate` that is not a multiple of 90 is treated as 0 (pdf.js behaviour); images become a Letter page oriented by aspect ratio, fit + centered.
 - **Export** copies duplicated source pages in separate `copyPages` rounds (same page leaf cannot be added twice); the annotation layer is its own content stream `q <cm> … Q`; one ExtGState per page per (opacity, blend mode); standard fonts embedded once per document; images cached by data URL per export; text sanitized to WinAnsi (`?` for unsupported glyphs).
 - **Rotating a page remaps its annotations** (`src/core/annotation-transform.ts`) so they stay on the content they were drawn over.
-- **First import is not undoable** (no snapshot when the document was empty); `clearDocument` resets tool/zoom/view.
+- **An import into an empty document with no history is not undoable**; after deleting every page the import is recorded so undo can restore the old pages, and the new file names the output. `clearDocument` resets tool/zoom/view.
+- **Unicode text**: the exporter embeds only the standard 14 fonts (WinAnsi). Before saving, `src/app/text-raster.ts` rasterises any text annotation containing other characters (CJK, Arabic, Cyrillic, emoji…) with the browser's fonts at ~288 dpi and exports it as an image, so the saved page matches the screen; Latin text stays real PDF text. `exportPdf` reports residual problems through `ExportOptions.warnings`, which the save toast shows. A fontkit-embedded fallback font would make such text selectable; not done.
+- **Original page content is isolated in a Form XObject** on export (`q /PEfmN Do Q`), so unbalanced `q`/`cm` operators in a source page cannot shift the annotation layer (one unmatched `q` after a `cm` was enough to break the old approach).
+- **Lenient page trees**: `repairPageTree` (pdf-utils) gives `/Type` to untyped page-tree nodes after load so pdf-lib and pdf.js enumerate the same pages (otherwise the editor could show one page and export another).
+- **JPEG EXIF orientation** is honoured: the app re-encodes oriented JPEGs upright before import; `importFile` also reads the tag as a fallback.
+- **Busy state**: imports are serialised and saves are guarded (`store.busy`); the toolbar disables Save while busy and `Notice` shows a busy indicator.
+- **Memory**: `releasePage` frees pdf.js's decoded page data when the editor leaves a page; thumbnails release after rendering.
+- **Multi-selection** in the sidebar is honoured by the toolbar page actions and the Delete key in either view.
 - **Electron**: `app.enableSandbox()` is deliberately not used (it forces `--enable-sandbox`, which overrides `--no-sandbox` and kills child processes when running as root in CI); per-window `sandbox: true` instead. `PDF_EDITOR_USER_DATA_DIR` env overrides the prefs dir for tests. Unsigned macOS builds need right-click → Open the first time.
 - **Web deployment**: `.github/workflows/deploy-pages.yml` publishes the renderer to GitHub Pages from `main` (enable Pages → Source: GitHub Actions once). `public/manifest.webmanifest` makes it installable from the browser.
 
 ## Known gaps / follow-ups
 
-- Export: a malformed source page that leaves two or more unmatched `q` operators could shift the annotation CTM (pdf-lib's wrapper neutralises one). Fixing it needs content-stream tokenizing.
-- Export: duplicated pages embed shared fonts/images once per copy (bigger files for many duplicates); ink is exported as polylines (no smoothing); imported photos are not downsampled.
+- Export: non-Latin text is rasterised (not selectable/searchable); embedding a Unicode fallback font via `@pdf-lib/fontkit` would fix that. Duplicated pages embed shared fonts/images once per copy; ink is exported as polylines (no smoothing); imported photos are not downsampled.
 - Export re-parses every source on each save (200 pages ≈ 0.4 s); cache pdf-lib documents per source if large files feel slow.
 - AcroForm fields: widget appearances are copied but the output has no `/AcroForm`, so forms are flattened-looking, not interactive.
-- Editor: pen/highlighter points are not clamped to the page; devicePixelRatio changes do not trigger a re-render until the next zoom/page change; `render.ts` never times out if the pdf.js worker fails to load.
-- Signature dialog: changing colour/width recolours the whole drawing; saved signatures capped at 8 (oldest evicted when localStorage is full).
+- Editor: annotations cannot be reached, selected or nudged from the keyboard (the overlay is not focusable) — deliberate later milestone. Pen/highlighter points are not clamped to the page; devicePixelRatio changes do not trigger a re-render until the next zoom/page change; `render.ts` never times out if the pdf.js worker fails to load.
+- Signature dialog: changing colour/width recolours the whole drawing; saved signatures capped at 8 (oldest evicted when localStorage is full; a signature that does not fit alone is not remembered).
 - Electron: only Linux (xvfb) exercised locally; macOS/Windows code paths untested until the release workflow runs. GTK may not fire accelerators of hidden menu items (zoom twins) on Linux.
-- Toolbar helpers (`src/components/Toolbar/helpers.ts`) have no unit tests yet.
+- Web app: saving uses a download when the File System Access API is unavailable; the reported name is then the suggested one.

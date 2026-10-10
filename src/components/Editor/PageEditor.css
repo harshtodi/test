@@ -75,6 +75,13 @@
   touch-action: none;
   cursor: default;
 }
+/* Select tool with nothing selected: a one-finger swipe pans the pane (and a pinch zooms)
+   instead of being swallowed. Drawing tools, and a selected annotation (drag / resize by
+   touch), keep owning the touch. Only the <svg> counts: Chromium ignores touch-action on
+   SVG children, so this cannot be done per shape. */
+.annotation-layer[data-tool='select']:not([data-selected]) {
+  touch-action: pan-x pan-y pinch-zoom;
+}
 /* the <svg> gets every pointer event; hit-testing is geometric */
 .annotation-layer * {
   pointer-events: none;

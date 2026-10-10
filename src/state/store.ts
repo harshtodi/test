@@ -26,6 +26,8 @@ import { rotateAnnotation } from '@/core/annotation-transform';
  */
 
 export type ViewMode = 'editor' | 'grid';
+/** A long-running document operation that must not be re-entered. */
+export type BusyState = 'saving' | 'importing' | null;
 
 const HISTORY_LIMIT = 200;
 
@@ -57,6 +59,8 @@ export interface EditorState {
   notice: { id: string; kind: 'info' | 'error'; message: string } | null;
   /** Whether the signature picker dialog is open. */
   signatureDialogOpen: boolean;
+  /** Set while a save or an import is running (guards re-entry, drives progress UI). */
+  busy: BusyState;
 
   // ----- document -----
   /** Add an imported source and append (or insert) all of its pages. Returns new page ids. */
@@ -101,6 +105,7 @@ export interface EditorState {
   notify: (kind: 'info' | 'error', message: string) => void;
   clearNotice: () => void;
   setSignatureDialogOpen: (open: boolean) => void;
+  setBusy: (busy: BusyState) => void;
 }
 
 function clonePages(pages: PageRef[]): PageRef[] {
@@ -146,6 +151,7 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
   future: [],
   notice: null,
   signatureDialogOpen: false,
+  busy: null,
 
   addSource: (source, insertAt) => {
     const newPages: PageRef[] = [];
@@ -156,10 +162,14 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
       const pages = [...state.pages];
       const at = insertAt === undefined ? pages.length : Math.max(0, Math.min(insertAt, pages.length));
       pages.splice(at, 0, ...newPages);
-      const first = Object.keys(state.sources).length === 0;
+      // An import into an empty document names the output (also after every
+      // page was deleted: the old name belonged to pages that are gone).
+      const first = state.pages.length === 0;
       const outputName = first ? suggestOutputName(source.name) : state.outputName;
       // The very first import is not undoable: there is nothing to go back to.
-      const history = state.pages.length === 0 ? { pages, past: [], future: [], dirty: true } : withHistory(state, pages);
+      // When pages were deleted first, keep the history so undo can bring them back.
+      const fresh = first && state.past.length === 0;
+      const history = fresh ? { pages, past: [], future: [], dirty: true } : withHistory(state, pages);
       return {
         ...history,
         sources: { ...state.sources, [source.id]: source },
@@ -178,6 +188,8 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
       if (pages.length === state.pages.length) return {};
       return {
         ...withHistory(state, pages),
+        // Nothing is left to lose once every page is gone (undo marks dirty again).
+        ...(pages.length === 0 ? { dirty: false } : {}),
         selectedPageIds: state.selectedPageIds.filter((id) => !removed.has(id)),
         activePageId: pickActive(pages, state.activePageId, removed, state.pages),
         selectedAnnotationId: null,
@@ -337,7 +349,7 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
         future,
         dirty: true,
         selectedAnnotationId: null,
-        activePageId: reconcileActive(prev.pages, state.activePageId),
+        activePageId: reconcileActive(prev.pages, state.activePageId, state.pages),
         selectedPageIds: state.selectedPageIds.filter((id) => prev.pages.some((p) => p.id === id)),
       };
     }),
@@ -354,7 +366,7 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
         future,
         dirty: true,
         selectedAnnotationId: null,
-        activePageId: reconcileActive(next.pages, state.activePageId),
+        activePageId: reconcileActive(next.pages, state.activePageId, state.pages),
         selectedPageIds: state.selectedPageIds.filter((id) => next.pages.some((p) => p.id === id)),
       };
     }),
@@ -381,11 +393,19 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
   notify: (kind, message) => set({ notice: { id: newId('n'), kind, message } }),
   clearNotice: () => set({ notice: null }),
   setSignatureDialogOpen: (open) => set({ signatureDialogOpen: open }),
+  setBusy: (busy) => set({ busy }),
 }));
 
-function reconcileActive(pages: PageRef[], active: PageId | null): PageId | null {
+/**
+ * Active page after undo/redo: keep it when it still exists, otherwise stay
+ * at the same position in the restored list (clamped) so the user does not
+ * jump back to page 1 after undoing an insert or redoing a delete.
+ */
+function reconcileActive(pages: PageRef[], active: PageId | null, oldPages: PageRef[]): PageId | null {
   if (active && pages.some((p) => p.id === active)) return active;
-  return pages[0]?.id ?? null;
+  if (pages.length === 0) return null;
+  const oldIdx = active ? oldPages.findIndex((p) => p.id === active) : -1;
+  return pages[oldIdx < 0 ? 0 : Math.min(oldIdx, pages.length - 1)]!.id;
 }
 
 export function suggestOutputName(sourceName: string): string {

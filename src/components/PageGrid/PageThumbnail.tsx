@@ -212,6 +212,7 @@ export const PageThumbnail = memo(function PageThumbnail({
           aria-label={`Page ${pageNumber} actions`}
           onPointerDown={stop}
           onMouseDown={stop}
+          onTouchStart={stop}
           onClick={stop}
           onDoubleClick={stop}
           onKeyDown={stopActivationKeys}
