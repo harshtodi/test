@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useEditorStore } from '@/state/store';
-import { saveDocument } from '@/app/actions';
+import { requestOpenFiles, saveDocument } from '@/app/actions';
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -17,6 +17,26 @@ export function useGlobalShortcuts(): void {
       if (mod && e.key.toLowerCase() === 's') {
         e.preventDefault();
         void saveDocument();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        requestOpenFiles();
+        return;
+      }
+      if (mod && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        s.setZoom(s.zoom * 1.25);
+        return;
+      }
+      if (mod && e.key === '-') {
+        e.preventDefault();
+        s.setZoom(s.zoom / 1.25);
+        return;
+      }
+      if (mod && e.key === '0') {
+        e.preventDefault();
+        s.setZoom(1);
         return;
       }
       if (mod && e.key.toLowerCase() === 'z') {
@@ -69,7 +89,9 @@ export function useGlobalShortcuts(): void {
             s.setTool('whiteout');
             break;
           case 'g':
+            // mirrors the Sign button: pick a signature first when none is chosen
             s.setTool('signature');
+            if (!s.currentSignature) s.setSignatureDialogOpen(true);
             break;
         }
       }

@@ -18,6 +18,10 @@ async function drag(page: Page, from: { x: number; y: number }, to: { x: number;
 
 const annotations = (page: Page) => page.getByTestId('annotation');
 
+// A Letter page at fit-to-width is ~1300px tall at 1280px wide; use a tall
+// viewport so clicks anywhere on the page land on-screen.
+test.use({ viewport: { width: 1280, height: 1600 } });
+
 test.describe('annotations', () => {
   test.beforeEach(async ({ page }) => {
     await openApp(page);

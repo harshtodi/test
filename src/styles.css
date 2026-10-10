@@ -88,6 +88,11 @@ textarea {
   position: relative;
 }
 
+/* Reserve the scrollbar gutter so fit-to-width never oscillates with classic scrollbars. */
+.editor-pane {
+  scrollbar-gutter: stable;
+}
+
 /* ---------- buttons ---------- */
 .btn {
   display: inline-flex;

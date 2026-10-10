@@ -11,8 +11,9 @@ import type {
   ToolSettings,
 } from '@/core/types';
 import { DEFAULT_TOOL_SETTINGS } from '@/core/types';
-import { addRotation } from '@/core/geometry';
+import { addRotation, getPageGeometry } from '@/core/geometry';
 import { newId } from '@/core/ids';
+import { rotateAnnotation } from '@/core/annotation-transform';
 
 /**
  * Single source of truth for the working document.
@@ -157,8 +158,10 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
       pages.splice(at, 0, ...newPages);
       const first = Object.keys(state.sources).length === 0;
       const outputName = first ? suggestOutputName(source.name) : state.outputName;
+      // The very first import is not undoable: there is nothing to go back to.
+      const history = state.pages.length === 0 ? { pages, past: [], future: [], dirty: true } : withHistory(state, pages);
       return {
-        ...withHistory(state, pages),
+        ...history,
         sources: { ...state.sources, [source.id]: source },
         activePageId: state.activePageId ?? newPages[0]?.id ?? null,
         outputName,
@@ -217,9 +220,17 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
     if (ids.length === 0) return;
     const target = new Set(ids);
     set((state) => {
-      const pages = state.pages.map((p) =>
-        target.has(p.id) ? { ...p, rotation: addRotation(p.rotation, delta) as Rotation } : p,
-      );
+      const pages = state.pages.map((p) => {
+        if (!target.has(p.id)) return p;
+        const source = state.sources[p.sourceId];
+        let annotations = p.annotations;
+        if (source && annotations.length) {
+          // keep annotations attached to the content they were drawn on
+          const g = getPageGeometry(p, source);
+          annotations = annotations.map((a) => rotateAnnotation(a, delta, g.displayWidth, g.displayHeight));
+        }
+        return { ...p, rotation: addRotation(p.rotation, delta) as Rotation, annotations };
+      });
       return withHistory(state, pages);
     });
   },
@@ -257,6 +268,10 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
       future: [],
       dirty: false,
       outputName: 'document.pdf',
+      tool: 'select',
+      zoom: 1,
+      viewMode: 'editor',
+      signatureDialogOpen: false,
     }),
 
   setOutputName: (name) => set({ outputName: name }),

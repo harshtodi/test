@@ -27,6 +27,9 @@ test.describe('page management', () => {
   });
 
   test('rearranges pages by dragging thumbnails', async ({ page }) => {
+    // the grid view fits a 4-page document in one row, so no auto-scroll interferes
+    await page.getByTestId('tb-view-grid').click();
+    await expect(page.getByTestId('page-grid-grid')).toBeVisible();
     await dragThumb(page, 0, 2);
     await expect
       .poll(async () => pageTexts(await saveAndDownload(page)), { timeout: 20_000 })

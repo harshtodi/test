@@ -1,15 +1,4 @@
 /* ---------- page editor (M3) ---------- */
-/*
- * The fit-to-width scale is derived from the pane's inner width. On platforms
- * with classic (non-overlay) scrollbars the vertical scrollbar would otherwise
- * shrink that width when the page gets taller than the pane, which shrinks the
- * page, which can drop the scrollbar again... Reserve the gutter so the width
- * the editor measures never depends on whether the pane currently scrolls.
- */
-.editor-pane:has(> .page-editor) {
-  scrollbar-gutter: stable;
-}
-
 .page-editor {
   position: relative;
   display: flex;

@@ -51,6 +51,13 @@ export async function openFiles(files: Iterable<File | OpenedFile>, insertAt?: n
   if (failures.length) store.notify('error', `Could not open ${failures.join('; ')}`);
 }
 
+/** Name of the window event the shortcuts layer fires for Ctrl/Cmd+O. */
+export const OPEN_REQUEST_EVENT = 'pdf-editor:open-request';
+
+export function requestOpenFiles(): void {
+  window.dispatchEvent(new CustomEvent(OPEN_REQUEST_EVENT));
+}
+
 /** Open the host's native dialog when available, else trigger the provided fallback. */
 export async function openFilesViaDialog(fallback: () => void): Promise<void> {
   const platform = getPlatform();
@@ -70,7 +77,7 @@ export async function saveDocument(): Promise<boolean> {
     return false;
   }
   try {
-    const bytes = await exportPdf(state.pages, state.sources);
+    const bytes = await exportPdf(state.pages, state.sources, { title: state.outputName.replace(/\.pdf$/i, '') });
     const result = await getPlatform().saveFile(bytes, state.outputName);
     if (result.saved) {
       useEditorStore.getState().markSaved();
@@ -93,8 +100,8 @@ export async function saveSelectedPages(): Promise<boolean> {
     return false;
   }
   try {
-    const bytes = await exportPdf(pages, state.sources);
     const name = state.outputName.replace(/\.pdf$/i, '') + `-pages.pdf`;
+    const bytes = await exportPdf(pages, state.sources, { title: name.replace(/\.pdf$/i, '') });
     const result = await getPlatform().saveFile(bytes, name);
     if (result.saved) useEditorStore.getState().notify('info', `Saved ${result.location ?? name}`);
     return result.saved;

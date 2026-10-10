@@ -8,9 +8,12 @@
  * - `getThumbnailDataUrl` renders small previews through a queue and caches
  *   them, so reordering pages never re-renders.
  */
-import * as pdfjsLib from 'pdfjs-dist';
-import type { PDFDocumentProxy, PDFPageProxy, PageViewport } from 'pdfjs-dist';
-import PdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?worker';
+// The legacy build bundles the polyfills (e.g. Map.prototype.getOrInsertComputed)
+// that the modern build expects from the engine; Chromium 141/142 (Playwright,
+// Electron 39) do not have them yet, so the modern build fails to render.
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
+import type { PDFDocumentProxy, PDFPageProxy, PageViewport } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import PdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?worker';
 import type { PageGeometry, PageRef, SourceDoc, SourceId } from './types';
 import { getPageGeometry } from './geometry';
 
